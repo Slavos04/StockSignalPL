@@ -1417,10 +1417,9 @@ export const TabPortfolios: React.FC<TabPortfoliosProps> = ({
           </div>
         </div>
       ) : currentPortfolio ? (
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Left 2 Cols: Stats, Benchmark comparison, and Rebalance */}
-          <div className="lg:col-span-2 space-y-6">
-            <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-6 shadow-xl relative overflow-hidden">
+        <div className="space-y-6">
+          {/* Kafelek 1: Statystyki i Krzywa Kapitału (Pełna Szerokość Okna) */}
+          <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-6 shadow-xl relative overflow-hidden">
               <div className="flex flex-wrap items-center justify-between gap-4 mb-6">
                 <div>
                   <div className="flex items-center gap-2">
@@ -1664,12 +1663,12 @@ export const TabPortfolios: React.FC<TabPortfoliosProps> = ({
                       />
                     </ComposedChart>
                   </ResponsiveContainer>
-                </div>
               </div>
             </div>
+          </div>
 
-            {/* Multi-TP (33/33/34) Active Positions Table (Sticky First Column + Sortable) */}
-            <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-6 shadow-xl">
+          {/* Kafelek 2: Otwarte Pozycje & Mechanika Multi-TP (Pełna Szerokość Okna) */}
+          <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-6 shadow-xl">
               <div className="flex items-center justify-between mb-4">
                 <div>
                   <h3 className="text-base font-bold text-white flex items-center gap-2">
@@ -2078,62 +2077,68 @@ export const TabPortfolios: React.FC<TabPortfoliosProps> = ({
                 </div>
               )}
             </div>
-          </div>
 
-          {/* Right Col: Allocation & Strategy Rules */}
-          <div className="space-y-6">
-            <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-6 shadow-xl">
-              <h3 className="text-sm font-bold text-white mb-4">Alokacja Aktywów w PLN</h3>
-              <div className="space-y-3">
-                <div>
-                  <div className="flex justify-between text-xs mb-1">
-                    <span className="text-slate-400">Akcje & Kontrakty GPW</span>
-                    <span className="font-mono text-white font-semibold">
-                      {currentPortfolio.allocatedPln.toLocaleString('pl-PL')} PLN ({((currentPortfolio.allocatedPln / (currentPortfolio.currentBalance || 1)) * 100).toFixed(1)}%)
-                    </span>
+          {/* Kafelek 3: Alokacja Aktywów & Zasady Strategii (Pełna Szerokość Okna) */}
+          <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-6 shadow-xl">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {/* Sekcja 1: Alokacja Aktywów w PLN */}
+              <div>
+                <h3 className="text-sm font-bold text-white mb-4">Alokacja Aktywów w PLN</h3>
+                <div className="space-y-3">
+                  <div>
+                    <div className="flex justify-between text-xs mb-1">
+                      <span className="text-slate-400">Akcje & Kontrakty GPW</span>
+                      <span className="font-mono text-white font-semibold">
+                        {currentPortfolio.allocatedPln.toLocaleString('pl-PL')} PLN ({((currentPortfolio.allocatedPln / (currentPortfolio.currentBalance || 1)) * 100).toFixed(1)}%)
+                      </span>
+                    </div>
+                    <div className="w-full h-2 rounded-full bg-slate-800 overflow-hidden">
+                      <div
+                        className="h-full bg-teal-500 rounded-full"
+                        style={{ width: `${Math.min(100, (currentPortfolio.allocatedPln / (currentPortfolio.currentBalance || 1)) * 100)}%` }}
+                      ></div>
+                    </div>
                   </div>
-                  <div className="w-full h-2 rounded-full bg-slate-800 overflow-hidden">
-                    <div
-                      className="h-full bg-teal-500 rounded-full"
-                      style={{ width: `${Math.min(100, (currentPortfolio.allocatedPln / (currentPortfolio.currentBalance || 1)) * 100)}%` }}
-                    ></div>
-                  </div>
-                </div>
 
-                <div>
-                  <div className="flex justify-between text-xs mb-1">
-                    <span className="text-slate-400">Wolna Gotówka (PLN)</span>
-                    <span className="font-mono text-white font-semibold">
-                      {currentPortfolio.cashPln.toLocaleString('pl-PL')} PLN ({((currentPortfolio.cashPln / (currentPortfolio.currentBalance || 1)) * 100).toFixed(1)}%)
-                    </span>
-                  </div>
-                  <div className="w-full h-2 rounded-full bg-slate-800 overflow-hidden">
-                    <div
-                      className="h-full bg-emerald-500 rounded-full"
-                      style={{ width: `${Math.min(100, (currentPortfolio.cashPln / (currentPortfolio.currentBalance || 1)) * 100)}%` }}
-                    ></div>
+                  <div>
+                    <div className="flex justify-between text-xs mb-1">
+                      <span className="text-slate-400">Wolna Gotówka (PLN)</span>
+                      <span className="font-mono text-white font-semibold">
+                        {currentPortfolio.cashPln.toLocaleString('pl-PL')} PLN ({((currentPortfolio.cashPln / (currentPortfolio.currentBalance || 1)) * 100).toFixed(1)}%)
+                      </span>
+                    </div>
+                    <div className="w-full h-2 rounded-full bg-slate-800 overflow-hidden">
+                      <div
+                        className="h-full bg-emerald-500 rounded-full"
+                        style={{ width: `${Math.min(100, (currentPortfolio.cashPln / (currentPortfolio.currentBalance || 1)) * 100)}%` }}
+                      ></div>
+                    </div>
                   </div>
                 </div>
               </div>
 
-              <div className="mt-6 pt-5 border-t border-slate-800 space-y-3 text-xs text-slate-300">
-                <div className="flex items-start gap-2">
-                  <div className="w-5 h-5 rounded-md bg-emerald-950 text-emerald-400 border border-emerald-800/40 flex items-center justify-center shrink-0 mt-0.5 font-bold">
-                    1
+              {/* Sekcja 2: Zasady Strategii Multi-TP */}
+              <div>
+                <h3 className="text-sm font-bold text-white mb-4">Zasady Strategii & Mechanika Portfela</h3>
+                <div className="space-y-3 text-xs text-slate-300">
+                  <div className="flex items-start gap-2">
+                    <div className="w-5 h-5 rounded-md bg-emerald-950 text-emerald-400 border border-emerald-800/40 flex items-center justify-center shrink-0 mt-0.5 font-bold">
+                      1
+                    </div>
+                    <p><b>Multi-TP (33/33/34):</b> Po osiągnięciu TP1 (+3.2%) system natychmiast zamyka 33% pozycji, a Stop-Loss przesuwa się na Break-Even (poziom wejścia).</p>
                   </div>
-                  <p><b>Multi-TP (33/33/34):</b> Po osiągnięciu TP1 (+3.2%) system natychmiast zamyka 33% pozycji, a Stop-Loss przesuwa się na Break-Even (poziom wejścia).</p>
-                </div>
-                <div className="flex items-start gap-2">
-                  <div className="w-5 h-5 rounded-md bg-emerald-950 text-emerald-400 border border-emerald-800/40 flex items-center justify-center shrink-0 mt-0.5 font-bold">
-                    2
+                  <div className="flex items-start gap-2">
+                    <div className="w-5 h-5 rounded-md bg-emerald-950 text-emerald-400 border border-emerald-800/40 flex items-center justify-center shrink-0 mt-0.5 font-bold">
+                      2
+                    </div>
+                    <p><b>Auto-Pilot GPW:</b> Konsensus live &gt;= 76% z 10 źródeł automatycznie otwiera pozycję o stałym ryzyku, jeśli Auto-Pilot jest włączony na danym portfelu.</p>
                   </div>
-                  <p><b>Auto-Pilot GPW:</b> Konsensus live &gt;= 76% z 10 źródeł automatycznie otwiera pozycję o stałym ryzyku, jeśli Auto-Pilot jest włączony na danym portfelu.</p>
-                </div>
-                <div className="flex items-start gap-2">
-                  <div className="w-5 h-5 rounded-md bg-emerald-950 text-emerald-400 border border-emerald-800/40 flex items-center justify-center shrink-0 mt-0.5 font-bold">
-                    3
+                  <div className="flex items-start gap-2">
+                    <div className="w-5 h-5 rounded-md bg-emerald-950 text-emerald-400 border border-emerald-800/40 flex items-center justify-center shrink-0 mt-0.5 font-bold">
+                      3
+                    </div>
+                    <p><b>Alerty Telegram:</b> Możliwość niezależnego włączania powiadomień Telegram na poziomie każdego portfela.</p>
                   </div>
-                  <p><b>Alerty Telegram:</b> Możliwość niezależnego włączania powiadomień Telegram na poziomie każdego portfela.</p>
                 </div>
               </div>
             </div>

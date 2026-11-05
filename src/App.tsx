@@ -7,7 +7,8 @@ import {
   TradeRecord,
   TelegramSettings,
   FearGreedData,
-  AppSettings
+  AppSettings,
+  AutoPilotNotification
 } from './types/stock';
 import { AuthService } from './services/authService';
 import { StooqService } from './services/stooqService';
@@ -22,6 +23,7 @@ import { AuthGuard } from './components/AuthGuard';
 import { ChangePasswordModal } from './components/ChangePasswordModal';
 import { ProgramInfoModal } from './components/ProgramInfoModal';
 import { SettingsModal } from './components/SettingsModal';
+import { AutoPilotToast } from './components/AutoPilotToast';
 import { TabPortfolios } from './components/TabPortfolios';
 import { TabAudit } from './components/TabAudit';
 import { TabConsensus } from './components/TabConsensus';
@@ -31,6 +33,7 @@ import { TabAdminSettings } from './components/TabAdminSettings';
 export default function App() {
   const [currentUser, setCurrentUser] = useState<UserAccount | null>(null);
   const [activeTab, setActiveTab] = useState<'portfolios' | 'audit' | 'consensus' | 'ranking' | 'admin'>('portfolios');
+  const [autoPilotNotifications, setAutoPilotNotifications] = useState<AutoPilotNotification[]>([]);
   
   // Data states
   const [stocks, setStocks] = useState<StockQuote[]>([]);
@@ -123,7 +126,11 @@ export default function App() {
     return status;
   });
 
-  // Countdown and Auto-Refresh Timer - TYLKO podczas trwania sesji GPW
+  const triggerAutoPilotNotification = (notif: AutoPilotNotification) => {
+    setAutoPilotNotifications(prev => [notif, ...prev].slice(0, 5));
+  };
+
+  // Countdown and Auto-Refresh Timer - Aktywny podczas sesji GPW dla wszystkich walorów oraz 24/7 dla Surowców
   useEffect(() => {
     const timer = setInterval(() => {
       let currentStatus = MarketSessionService.getGpwStatus();
@@ -136,13 +143,6 @@ export default function App() {
         };
       }
       setMarketSession(currentStatus);
-
-      // Warunek zadania: włącz odświeżanie automatyczne tylko podczas trwania sesji.
-      // Gdy giełda nie działa wyłącz odświeżanie automatyczne. Zostaw tylko odświeżanie ręczne.
-      if (!currentStatus.isOpen) {
-        // Poza sesją giełdową timer jest wstrzymany
-        return;
-      }
 
       setSecondsUntilRefresh(prev => {
         if (prev <= 1) {
@@ -167,8 +167,13 @@ export default function App() {
     await StooqService.fetchRealMarketData();
     const freshStocks = [...StooqService.getStocks()];
     setStocks(freshStocks);
-    PortfolioService.simulatePositionUpdate(freshStocks);
+
+    // Automatyczna egzekucja Auto-Pilota: sprawdzanie TP/SL oraz zakupy silnych rekomendacji
+    PortfolioService.simulatePositionUpdate(freshStocks, triggerAutoPilotNotification);
+    PortfolioService.checkAndExecuteAutoPilotBuys(freshStocks, triggerAutoPilotNotification);
+
     setPortfolios([...PortfolioService.getPortfolios()]);
+    setTrades([...PortfolioService.getTrades()]);
 
     // Real sentiment & WIG20 calculation (zero random noise)
     const wig20Stock = freshStocks.find(s => s.symbol.toUpperCase().includes('WIG20') || s.cleanSymbol.toUpperCase().includes('WIG20') || s.cleanSymbol.toUpperCase().includes('FW20'));
@@ -206,8 +211,12 @@ export default function App() {
     await StooqService.fetchRealMarketData();
     const freshStocks = [...StooqService.getStocks()];
     setStocks(freshStocks);
-    PortfolioService.simulatePositionUpdate(freshStocks);
+
+    PortfolioService.simulatePositionUpdate(freshStocks, triggerAutoPilotNotification);
+    PortfolioService.checkAndExecuteAutoPilotBuys(freshStocks, triggerAutoPilotNotification);
+
     setPortfolios([...PortfolioService.getPortfolios()]);
+    setTrades([...PortfolioService.getTrades()]);
 
     const wig20Stock = freshStocks.find(s => s.symbol.toUpperCase().includes('WIG20') || s.cleanSymbol.toUpperCase().includes('WIG20') || s.cleanSymbol.toUpperCase().includes('FW20'));
     const advancing = freshStocks.filter(s => s.changePercent > 0).length;
@@ -322,6 +331,7 @@ export default function App() {
             marketSessionInfo={marketSession}
             stocks={stocks}
             portfolios={portfolios}
+            onSelectTicker={(sym) => handleSwitchToConsensus(sym)}
           />
 
           {/* Main Content Area */}
@@ -397,6 +407,12 @@ export default function App() {
             </div>
           </footer>
         </div>
+
+        {/* Floating Auto-Pilot Toast Notifications */}
+        <AutoPilotToast
+          notifications={autoPilotNotifications}
+          onDismiss={(id) => setAutoPilotNotifications(prev => prev.filter(n => n.id !== id))}
+        />
 
         {/* Modals */}
         {currentUser && (

@@ -214,3 +214,18 @@ export interface FearGreedData {
   wig20Value: number;
   updatedAt: string;
 }
+
+export interface AutoPilotNotification {
+  id: string;
+  type: 'BUY' | 'SELL_TP' | 'SELL_SL';
+  title: string;
+  message: string;
+  ticker: string;
+  portfolioName: string;
+  shares: number;
+  pricePln: number;
+  totalPln: number;
+  resultPln?: number;
+  timestamp: string;
+}
+

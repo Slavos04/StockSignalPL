@@ -1,5 +1,6 @@
-import { PortfolioStrategy, TradeRecord, PositionItem, StockQuote } from '../types/stock';
+import { PortfolioStrategy, TradeRecord, PositionItem, StockQuote, AutoPilotNotification } from '../types/stock';
 import { INITIAL_PORTFOLIOS, INITIAL_TRADES } from '../data/initialData';
+import { AudioService } from './audioService';
 
 const PORTFOLIOS_STORAGE_KEY = 'stocksignalpl_portfolios_v1';
 const TRADES_STORAGE_KEY = 'stocksignalpl_trades_v1';
@@ -479,50 +480,257 @@ export class PortfolioService {
   }
 
   /**
-   * Symulacja realizacji TP / SL w portfelu
+   * Symulacja realizacji TP / SL w portfelu oraz automatyczna egzekucja transakcji zawiadamiająca użytkownika
    */
-  public static simulatePositionUpdate(stockQuotes: StockQuote[]): void {
+  public static simulatePositionUpdate(
+    stockQuotes: StockQuote[],
+    onNotification?: (notif: AutoPilotNotification) => void
+  ): void {
     let changed = false;
 
     this.portfolios.forEach(p => {
+      const remainingPositions: PositionItem[] = [];
+
       p.activePositions.forEach(pos => {
-        const quote = stockQuotes.find(q => q.symbol === pos.ticker);
+        const quote = stockQuotes.find(q => q.symbol === pos.ticker || q.cleanSymbol === pos.ticker);
         if (quote) {
           pos.currentPrice = quote.price;
           pos.pnlPln = Number(((pos.currentPrice - pos.entryPrice) * pos.shares).toFixed(2));
           pos.pnlPercent = Number((((pos.currentPrice - pos.entryPrice) / pos.entryPrice) * 100).toFixed(2));
 
-          // Multi-TP logic:
-          // TP1 (33% wolumenu)
+          const timestamp = new Date().toLocaleTimeString('pl-PL', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+
+          // 1. Osiągnięcie TP1 (33% wolumenu) -> Realizacja częściowa 33% i przesunięcie SL na Break-Even
           if (!pos.tp1Reached && pos.currentPrice >= pos.targetPrice1) {
             pos.tp1Reached = true;
             pos.status = 'ZREALIZOWANO TP1';
+            pos.stopLoss = Math.max(pos.stopLoss, pos.entryPrice); // Break-even SL
+            
+            const soldShares = Math.max(1, Math.floor(pos.shares * 0.33));
+            const returnCash = Number((soldShares * pos.currentPrice).toFixed(2));
+            const pnlPart = Number(((pos.currentPrice - pos.entryPrice) * soldShares).toFixed(2));
+
+            p.cashPln = Number((p.cashPln + returnCash).toFixed(2));
+            p.allocatedPln = Math.max(0, Number((p.allocatedPln - (soldShares * pos.entryPrice)).toFixed(2)));
+            p.currentBalance = Number((p.cashPln + p.allocatedPln).toFixed(2));
+            p.totalProfitPln = Number((p.totalProfitPln + pnlPart).toFixed(2));
+
+            // Zapisz wpis w Dzienniku Tradera
+            const tradeLog: TradeRecord = {
+              id: `tr_${Date.now()}_tp1`,
+              date: new Date().toLocaleString('pl-PL', { dateStyle: 'short', timeStyle: 'short' }),
+              ticker: pos.ticker,
+              name: pos.name,
+              type: 'SPRZEDAŻ',
+              pricePln: pos.currentPrice,
+              shares: soldShares,
+              totalPln: returnCash,
+              resultPln: pnlPart,
+              resultPercent: Number((((pos.currentPrice - pos.entryPrice) / pos.entryPrice) * 100).toFixed(2)),
+              strategyId: p.id,
+              reason: `Auto-Pilot: Osiągnięto poziom TP1 (+3.2%). Realizacja 33% pozycji i przesunięcie SL na Break-Even (${pos.entryPrice.toFixed(2)} zł)`,
+              status: 'AUTO-PILOT'
+            };
+            this.trades.unshift(tradeLog);
             changed = true;
+
+            AudioService.playTpChime();
+            if (onNotification) {
+              onNotification({
+                id: `notif_${Date.now()}_tp1`,
+                type: 'SELL_TP',
+                title: '🤖 Auto-Pilot: Realizacja TP1 (33%)',
+                message: `Pomyślnie zrealizowano 33% pozycji ${pos.ticker} po kursie ${pos.currentPrice.toFixed(2)} zł. SL przesunięty na Break-Even!`,
+                ticker: pos.ticker,
+                portfolioName: p.name,
+                shares: soldShares,
+                pricePln: pos.currentPrice,
+                totalPln: returnCash,
+                resultPln: pnlPart,
+                timestamp
+              });
+            }
           }
-          // TP2 (33% wolumenu)
+
+          // 2. Osiągnięcie TP2 (kolejne 33% wolumenu)
           if (pos.tp1Reached && !pos.tp2Reached && pos.currentPrice >= pos.targetPrice2) {
             pos.tp2Reached = true;
             pos.status = 'ZREALIZOWANO TP2';
+
+            const soldShares = Math.max(1, Math.floor(pos.shares * 0.33));
+            const returnCash = Number((soldShares * pos.currentPrice).toFixed(2));
+            const pnlPart = Number(((pos.currentPrice - pos.entryPrice) * soldShares).toFixed(2));
+
+            p.cashPln = Number((p.cashPln + returnCash).toFixed(2));
+            p.allocatedPln = Math.max(0, Number((p.allocatedPln - (soldShares * pos.entryPrice)).toFixed(2)));
+            p.currentBalance = Number((p.cashPln + p.allocatedPln).toFixed(2));
+            p.totalProfitPln = Number((p.totalProfitPln + pnlPart).toFixed(2));
+
+            const tradeLog: TradeRecord = {
+              id: `tr_${Date.now()}_tp2`,
+              date: new Date().toLocaleString('pl-PL', { dateStyle: 'short', timeStyle: 'short' }),
+              ticker: pos.ticker,
+              name: pos.name,
+              type: 'SPRZEDAŻ',
+              pricePln: pos.currentPrice,
+              shares: soldShares,
+              totalPln: returnCash,
+              resultPln: pnlPart,
+              resultPercent: Number((((pos.currentPrice - pos.entryPrice) / pos.entryPrice) * 100).toFixed(2)),
+              strategyId: p.id,
+              reason: `Auto-Pilot: Osiągnięto poziom TP2 (+6.5%). Realizacja kolejnych 33% pozycji z zyskiem.`,
+              status: 'AUTO-PILOT'
+            };
+            this.trades.unshift(tradeLog);
             changed = true;
+
+            AudioService.playTpChime();
+            if (onNotification) {
+              onNotification({
+                id: `notif_${Date.now()}_tp2`,
+                type: 'SELL_TP',
+                title: '🤖 Auto-Pilot: Realizacja TP2 (33%)',
+                message: `Pomyślnie zrealizowano kolejne 33% pozycji ${pos.ticker} po kursie ${pos.currentPrice.toFixed(2)} zł!`,
+                ticker: pos.ticker,
+                portfolioName: p.name,
+                shares: soldShares,
+                pricePln: pos.currentPrice,
+                totalPln: returnCash,
+                resultPln: pnlPart,
+                timestamp
+              });
+            }
           }
-          // TP3 (34% wolumenu)
-          if (pos.tp2Reached && !pos.tp3Reached && pos.currentPrice >= pos.targetPrice3) {
-            pos.tp3Reached = true;
-            pos.status = 'ZAMKNIĘTO ZYSK';
+
+          // 3. Osiągnięcie TP3 (+11.8%) lub STOP LOSS -> Pełne zamknięcie pozostałej pozycji
+          const isTp3 = pos.tp2Reached && !pos.tp3Reached && pos.currentPrice >= pos.targetPrice3;
+          const isSl = pos.currentPrice <= pos.stopLoss;
+
+          if (isTp3 || isSl) {
             changed = true;
+            const remainingShares = pos.shares;
+            const returnCash = Number((remainingShares * pos.currentPrice).toFixed(2));
+            const pnlPart = Number(((pos.currentPrice - pos.entryPrice) * remainingShares).toFixed(2));
+
+            p.cashPln = Number((p.cashPln + returnCash).toFixed(2));
+            p.allocatedPln = Math.max(0, Number((p.allocatedPln - (remainingShares * pos.entryPrice)).toFixed(2)));
+            p.currentBalance = Number((p.cashPln + p.allocatedPln).toFixed(2));
+            p.totalProfitPln = Number((p.totalProfitPln + pnlPart).toFixed(2));
+
+            const tradeLog: TradeRecord = {
+              id: `tr_${Date.now()}_close`,
+              date: new Date().toLocaleString('pl-PL', { dateStyle: 'short', timeStyle: 'short' }),
+              ticker: pos.ticker,
+              name: pos.name,
+              type: 'SPRZEDAŻ',
+              pricePln: pos.currentPrice,
+              shares: remainingShares,
+              totalPln: returnCash,
+              resultPln: pnlPart,
+              resultPercent: Number((((pos.currentPrice - pos.entryPrice) / pos.entryPrice) * 100).toFixed(2)),
+              strategyId: p.id,
+              reason: isTp3
+                ? `Auto-Pilot: Osiągnięto docelowe TP3 (+11.8%). Całkowita realizacja zysków z pozycji.`
+                : `Auto-Pilot: Pozycja dotknęła poziomu Stop-Loss (${pos.stopLoss.toFixed(2)} zł). Automatyczne ucięcie strat.`,
+              status: isTp3 ? 'ZYSK (TP)' : 'STRATA (SL)'
+            };
+            this.trades.unshift(tradeLog);
+
+            if (isTp3) {
+              AudioService.playTpChime();
+            } else {
+              AudioService.playSlChime();
+            }
+
+            if (onNotification) {
+              onNotification({
+                id: `notif_${Date.now()}_close`,
+                type: isTp3 ? 'SELL_TP' : 'SELL_SL',
+                title: isTp3 ? '🤖 Auto-Pilot: Pełna realizacja TP3 (+11.8%)' : '🤖 Auto-Pilot: Aktywacja Stop Loss',
+                message: isTp3
+                  ? `Pozycja ${pos.ticker} została w pełni zamknięta z zyskiem +${pnlPart.toLocaleString('pl-PL')} PLN!`
+                  : `Pozycja ${pos.ticker} została zamknięta na poziomie SL (${pos.stopLoss.toFixed(2)} zł). Obcięto straty.`,
+                ticker: pos.ticker,
+                portfolioName: p.name,
+                shares: remainingShares,
+                pricePln: pos.currentPrice,
+                totalPln: returnCash,
+                resultPln: pnlPart,
+                timestamp
+              });
+            }
+
+            // Do not keep in activePositions
+            return;
           }
-          // SL
-          if (pos.currentPrice <= pos.stopLoss && pos.status !== 'ZAMKNIĘTO ZYSK') {
-            pos.status = 'STOP LOSS';
-            changed = true;
-          }
+
+          remainingPositions.push(pos);
+        } else {
+          remainingPositions.push(pos);
         }
       });
+
+      p.activePositions = remainingPositions;
     });
 
     if (changed) {
       this.savePortfolios();
+      this.saveTrades();
     }
+  }
+
+  /**
+   * Automatyczne wyszukiwanie okazji rynkowych (MOCNE KUPUJ >= 76%) i zakupy przez Auto-Pilot
+   */
+  public static checkAndExecuteAutoPilotBuys(
+    stockQuotes: StockQuote[],
+    onNotification?: (notif: AutoPilotNotification) => void
+  ): void {
+    const activePortfolios = this.getPortfolios().filter(p => p.autoPilotEnabled);
+    if (activePortfolios.length === 0) return;
+
+    stockQuotes.forEach(stock => {
+      // Przyjmij kryterium MOCNE KUPUJ: rsi14 < 68, dodatnia zmiana lub wygenerowany sygnał wzrostowy
+      const isStrongBuy = (stock.trendScore && stock.trendScore >= 76) ||
+                          (stock.analystRecommendation?.includes('KUPUJ') && stock.changePercent > 0.3) ||
+                          (stock.rsi14 < 65 && stock.macd.hist > 0 && stock.changePercent > 0.5);
+
+      if (!isStrongBuy) return;
+
+      activePortfolios.forEach(portfolio => {
+        // Sprawdź czy portfel nie posiada już aktywnej pozycji w tym walorze
+        const alreadyHolds = portfolio.activePositions.some(
+          pos => pos.ticker.toLowerCase() === stock.symbol.toLowerCase() ||
+                 pos.ticker.toLowerCase() === stock.cleanSymbol.toLowerCase()
+        );
+
+        if (alreadyHolds) return;
+
+        // Ogranicz liczbę pozycji w jednym portfelu do max 8
+        if (portfolio.activePositions.length >= 8) return;
+
+        // Spróbuj dokonać zakupu Auto-Pilota
+        const result = this.executeAutoPilotSignal(stock, stock.trendScore || 82, stock.price, portfolio.id);
+        if (result.success && result.position) {
+          AudioService.playBuyChime();
+          const timestamp = new Date().toLocaleTimeString('pl-PL', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+          if (onNotification) {
+            onNotification({
+              id: `notif_buy_${Date.now()}`,
+              type: 'BUY',
+              title: '🤖 Auto-Pilot: Automatyczne KUPNO GPW',
+              message: `Auto-Pilot zakupił ${result.position.shares} szt. ${stock.symbol} za kwotę ${result.position.shares * result.position.entryPrice} PLN w portfelu "${portfolio.name}".`,
+              ticker: stock.symbol,
+              portfolioName: portfolio.name,
+              shares: result.position.shares,
+              pricePln: result.position.entryPrice,
+              totalPln: Number((result.position.shares * result.position.entryPrice).toFixed(2)),
+              timestamp
+            });
+          }
+        }
+      });
+    });
   }
 
   /**

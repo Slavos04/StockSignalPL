@@ -40,6 +40,7 @@ interface NavbarProps {
   marketSessionInfo: MarketSessionInfo;
   stocks?: StockQuote[];
   portfolios?: PortfolioStrategy[];
+  onSelectTicker?: (symbol: string) => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -56,7 +57,8 @@ export const Navbar: React.FC<NavbarProps> = ({
   onOpenSettingsModal,
   marketSessionInfo,
   stocks = [],
-  portfolios = []
+  portfolios = [],
+  onSelectTicker
 }) => {
   const [userMenuOpen, setUserMenuOpen] = React.useState(false);
   const [isOptimismModalOpen, setIsOptimismModalOpen] = React.useState(false);
@@ -81,6 +83,7 @@ export const Navbar: React.FC<NavbarProps> = ({
         const usdRate = 3.91; // Oficjalny NBP
         const usdPrice = (match.price / usdRate).toFixed(2);
         return {
+          rawSymbol: match.symbol,
           symbol: `${cleanSym} (${label})`,
           price: `$${usdPrice} (${match.price.toFixed(2)} zł)`,
           change: `${match.change >= 0 ? '+' : ''}${match.changePercent.toFixed(2)}%`,
@@ -99,15 +102,15 @@ export const Navbar: React.FC<NavbarProps> = ({
       findCommodity('XPT', 'Platyna'),
       findCommodity('NG', 'Gaz') || findCommodity('NATGAS', 'Gaz'),
       findCommodity('W', 'Pszenica') || findCommodity('WHEAT', 'Pszenica')
-    ].filter(Boolean) as { symbol: string; price: string; change: string; isUp: boolean }[];
+    ].filter(Boolean) as { rawSymbol: string; symbol: string; price: string; change: string; isUp: boolean }[];
 
     // 2. Indeksy GPW
     const indices = [
-      { symbol: 'WIG20', price: `${fearGreed.wig20Value.toFixed(2)} pkt`, change: `${fearGreed.wig20Change >= 0 ? '+' : ''}${fearGreed.wig20Change.toFixed(2)}%`, isUp: fearGreed.wig20Change >= 0 },
-      { symbol: 'FW20 Futures', price: `${fearGreed.wig20Value.toFixed(2)} pkt`, change: `${fearGreed.wig20Change >= 0 ? '+' : ''}${fearGreed.wig20Change.toFixed(2)}%`, isUp: fearGreed.wig20Change >= 0 },
-      { symbol: 'mWIG40', price: '6 180 pkt', change: '+1.14%', isUp: true },
-      { symbol: 'sWIG80', price: '24 310 pkt', change: '+0.68%', isUp: true },
-      { symbol: 'WIG-VIX', price: `${fearGreed.wigVix} pkt`, change: '-2.1%', isUp: false }
+      { rawSymbol: 'WIG20', symbol: 'WIG20', price: `${fearGreed.wig20Value.toFixed(2)} pkt`, change: `${fearGreed.wig20Change >= 0 ? '+' : ''}${fearGreed.wig20Change.toFixed(2)}%`, isUp: fearGreed.wig20Change >= 0 },
+      { rawSymbol: 'FW20.PL', symbol: 'FW20 Futures', price: `${fearGreed.wig20Value.toFixed(2)} pkt`, change: `${fearGreed.wig20Change >= 0 ? '+' : ''}${fearGreed.wig20Change.toFixed(2)}%`, isUp: fearGreed.wig20Change >= 0 },
+      { rawSymbol: 'PKN.PL', symbol: 'mWIG40', price: '6 180 pkt', change: '+1.14%', isUp: true },
+      { rawSymbol: 'KGH.PL', symbol: 'sWIG80', price: '24 310 pkt', change: '+0.68%', isUp: true },
+      { rawSymbol: 'PKO.PL', symbol: 'WIG-VIX', price: `${fearGreed.wigVix} pkt`, change: '-2.1%', isUp: false }
     ];
 
     // 3. Walory z portfeli inwestycyjnych (aktywne pozycje) lub baza akcji
@@ -118,13 +121,14 @@ export const Navbar: React.FC<NavbarProps> = ({
       });
     });
 
-    const portfolioStockList: { symbol: string; price: string; change: string; isUp: boolean }[] = [];
+    const portfolioStockList: { rawSymbol: string; symbol: string; price: string; change: string; isUp: boolean }[] = [];
     stocks.forEach(s => {
       const symUpper = s.symbol.toUpperCase();
       const cleanUpper = s.cleanSymbol.toUpperCase();
       // Jeśli walor jest w którymś z portfeli lub jest jedną z czołowych spółek
       if (portfolioTickers.has(symUpper) || portfolioTickers.has(cleanUpper) || portfolioTickers.size === 0 || ['PKN', 'KGH', 'PKO', 'CCC', 'CAR', 'DNP', 'LPP', 'PZU'].includes(cleanUpper)) {
         portfolioStockList.push({
+          rawSymbol: s.symbol,
           symbol: s.cleanSymbol,
           price: `${s.price.toFixed(2)} zł`,
           change: `${s.change >= 0 ? '+' : ''}${s.changePercent.toFixed(2)}%`,
@@ -238,30 +242,34 @@ export const Navbar: React.FC<NavbarProps> = ({
             <div className="animate-marquee gap-6 items-center text-xs font-mono">
               {/* Loop 1 */}
               {tickerItems.map((item, idx) => (
-                <div
+                <button
                   key={`t1_${item.symbol}_${idx}`}
-                  className="flex items-center gap-1.5 shrink-0 px-2 py-0.5 rounded hover:bg-slate-800/60 transition-colors cursor-default"
+                  onClick={() => onSelectTicker && onSelectTicker(item.rawSymbol)}
+                  title={`Kliknij, aby otworzyć notowania i analizę Konsensusu dla waloru: ${item.symbol}`}
+                  className="flex items-center gap-1.5 shrink-0 px-2 py-0.5 rounded hover:bg-slate-800 hover:border hover:border-emerald-500/50 transition-all cursor-pointer group"
                 >
-                  <span className="text-slate-400 font-medium">{item.symbol}:</span>
+                  <span className="text-slate-400 group-hover:text-emerald-300 font-medium">{item.symbol}:</span>
                   <span className="text-white font-semibold">{item.price}</span>
                   <span className={`font-bold ${item.isUp ? 'text-emerald-400' : 'text-rose-400'}`}>
                     {item.change}
                   </span>
-                </div>
+                </button>
               ))}
 
               {/* Loop 2 (for seamless continuous infinite marquee) */}
               {tickerItems.map((item, idx) => (
-                <div
+                <button
                   key={`t2_${item.symbol}_${idx}`}
-                  className="flex items-center gap-1.5 shrink-0 px-2 py-0.5 rounded hover:bg-slate-800/60 transition-colors cursor-default"
+                  onClick={() => onSelectTicker && onSelectTicker(item.rawSymbol)}
+                  title={`Kliknij, aby otworzyć notowania i analizę Konsensusu dla waloru: ${item.symbol}`}
+                  className="flex items-center gap-1.5 shrink-0 px-2 py-0.5 rounded hover:bg-slate-800 hover:border hover:border-emerald-500/50 transition-all cursor-pointer group"
                 >
-                  <span className="text-slate-400 font-medium">{item.symbol}:</span>
+                  <span className="text-slate-400 group-hover:text-emerald-300 font-medium">{item.symbol}:</span>
                   <span className="text-white font-semibold">{item.price}</span>
                   <span className={`font-bold ${item.isUp ? 'text-emerald-400' : 'text-rose-400'}`}>
                     {item.change}
                   </span>
-                </div>
+                </button>
               ))}
             </div>
           </div>

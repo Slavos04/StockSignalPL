@@ -2,7 +2,6 @@ import React, { useState } from 'react';
 import { AuthService } from '../services/authService';
 import { UserAccount } from '../types/stock';
 import {
-  ShieldCheck,
   Lock,
   User,
   Mail,
@@ -77,20 +76,6 @@ export const AuthGuard: React.FC<AuthGuardProps> = ({ currentUser, onLoginSucces
         }, 700);
       } else {
         setErrorMessage(res.error || 'Błąd rejestracji konta.');
-      }
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const handleQuickAdminLogin = async () => {
-    setLoginInput('admin');
-    setPasswordInput('Admin123!');
-    setIsLoading(true);
-    try {
-      const res = await AuthService.loginAsync('admin', 'Admin123!');
-      if (res.success && res.user) {
-        onLoginSuccess(res.user);
       }
     } finally {
       setIsLoading(false);
@@ -264,21 +249,9 @@ export const AuthGuard: React.FC<AuthGuardProps> = ({ currentUser, onLoginSucces
           </form>
         )}
 
-        {/* Quick Admin Helper Button */}
-        <div className="mt-6 pt-5 border-t border-slate-800 text-center">
-          <p className="text-[11px] text-slate-400 mb-2">Szybkie logowanie testowe:</p>
-          <button
-            type="button"
-            onClick={handleQuickAdminLogin}
-            className="w-full py-2 px-3 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-xs font-medium text-slate-300 flex items-center justify-center gap-2 transition-colors cursor-pointer"
-          >
-            <ShieldCheck className="w-4 h-4 text-amber-400" />
-            <span>Zaloguj jako <b>Administrator</b> (admin / Admin123!)</span>
-          </button>
-        </div>
+        {/* Footer copyright */}
       </div>
 
-      {/* Footer copyright */}
       <footer className="mt-8 text-center text-xs text-slate-500 z-10 space-y-1">
         <p>StockSignalPL v1.5 • Polski Rynek Giełdowy GPW • Kontakt: slavosmm@gmail.com</p>
       </footer>
