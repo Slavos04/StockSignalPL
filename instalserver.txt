@@ -1,0 +1,121 @@
+================================================================================
+INSTRUKCJA INSTALACJI I WDROŻENIA SERWERA - STOCKSIGNALPL v2.1
+Baza Danych: PostgreSQL 16 (Lokalny Serwer Ubuntu / Docker & Docker Compose)
+Harmonogram Feedów: Automatyczny pobór 24/7 (09:00 & 18:30 GPW)
+Kontakt: slavosmm@gmail.com
+================================================================================
+
+1. ARCHITEKTURA I PRZEZNACZENIE:
+--------------------------------------------------------------------------------
+- Środowisko docelowe: Serwer Ubuntu Linux (20.04 LTS, 22.04 LTS lub 24.04 LTS).
+- Baza danych: PostgreSQL 16 Alpine w osobnym dedykowanym kontenerze z trwałym
+  wolumenem (postgres_data).
+- Backend: Serwer Express w Node.js (server.ts) z automatyczną inicjalizacją tabel,
+  bezobsługowym harmonogramem pobierania feedów 2x dziennie (09:00 & 18:30 GPW)
+  oraz bezpieczną obsługą zapytań SQL.
+- Frontend: Zoptymalizowana aplikacja React + Tailwind CSS serwowana z portu 3000.
+- Całkowicie transparentna obsługa: użytkownik nie musi klikać żadnych przycisków
+  do synchronizacji. Loguje się swoim loginem i hasłem z dowolnej przeglądarki,
+  a portfele, transakcje, wyceny oraz rekomendacje są automatycznie zsynchronizowane.
+
+
+2. SZYBKIE WDROŻENIE DOCKER & DOCKER COMPOSE (JEDNO POLECENIE):
+--------------------------------------------------------------------------------
+Krok 1: Zaloguj się na swój serwer Ubuntu przez SSH:
+   ssh root@twoj_adres_ip_lub_domena
+
+Krok 2: Upewnij się, że masz zainstalowany Docker i Docker Compose:
+   sudo apt update
+   sudo apt install -y docker.io docker-compose-v2
+
+Krok 3: Sklonuj projekt do folderu na serwerze:
+   git clone <URL_REPOZYTORIUM> /opt/stocksignalpl
+   cd /opt/stocksignalpl
+
+Krok 4: Uruchom całość w tle za pomocą Docker Compose:
+   docker compose up -d --build
+
+Krok 5: Sprawdź status kontenerów:
+   docker compose ps
+   docker compose logs -f app
+
+Aplikacja jest od razu aktywna pod adresem: http://TWOJ_IP:3000
+
+
+3. STRUKTURA USŁUG DOCKER COMPOSE:
+--------------------------------------------------------------------------------
+- stocksignalpl-postgres:
+  * Obraz: postgres:16-alpine
+  * Użytkownik: stockuser
+  * Hasło: stockpassword123!
+  * Baza danych: stocksignalpl
+  * Wolumen danych: postgres_data (trwały zapis na dysku Ubuntu)
+  * Automatyczna inicjalizacja: plik init.sql
+
+- stocksignalpl-app:
+  * Port: 3000
+  * Zmienna DATABASE_URL: postgres://stockuser:stockpassword123!@postgres:5432/stocksignalpl
+
+
+4. DOMYŚLNE KONTA DO LOGOWANIA W BAZIE POSTGRESQL:
+--------------------------------------------------------------------------------
+1) Administrator Główny:
+   - Login: admin  (lub slavosmm@gmail.com)
+   - Hasło: Admin123!
+   - Uprawnienia: Pełne zarządzanie użytkownikami, portfelami i konfiguracją.
+
+2) Trader GPW:
+   - Login: trader_gpw
+   - Hasło: gpw2026!
+
+3) Nowi użytkownicy:
+   - Mogą zarejestrować się bezpośrednio w oknie logowania. Ich konto oraz
+     indywidualne portfele zostaną automatycznie zapisane w tabelach PostgreSQL.
+
+
+5. ZARZĄDZANIE KONTENERAMI NA UBUNTU:
+--------------------------------------------------------------------------------
+- Zatrzymanie aplikacji:
+  docker compose down
+
+- Ponowne uruchomienie / aktualizacja po zmianach kodu:
+  docker compose up -d --build
+
+- Podgląd logów aplikacji w czasie rzeczywistym:
+  docker compose logs -f app
+
+- Podgląd logów bazy PostgreSQL:
+  docker compose logs -f postgres
+
+- Wejście do konsoli psql w bazie:
+  docker exec -it stocksignalpl-postgres psql -U stockuser -d stocksignalpl
+
+
+6. REVERSE PROXY Z NGINX & CERTYFIKAT SSL LET'S ENCRYPT (OPCJONALNIE):
+--------------------------------------------------------------------------------
+Jeśli posiadasz własną domenę (np. gielda.twojadomena.pl):
+
+1) Zainstaluj Nginx i Certbot:
+   sudo apt install -y nginx certbot python3-certbot-nginx
+
+2) Utwórz plik /etc/nginx/sites-available/stocksignal:
+   server {
+       server_name gielda.twojadomena.pl;
+
+       location / {
+           proxy_pass http://127.0.0.1:3000;
+           proxy_http_version 1.1;
+           proxy_set_header Upgrade $http_upgrade;
+           proxy_set_header Connection 'upgrade';
+           proxy_set_header Host $host;
+           proxy_set_header X-Real-IP $remote_addr;
+           proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+           proxy_cache_bypass $http_upgrade;
+       }
+   }
+
+3) Włącz konfigurację i wygeneruj darmowy certyfikat SSL HTTPS:
+   sudo ln -s /etc/nginx/sites-available/stocksignal /etc/nginx/sites-enabled/
+   sudo nginx -t && sudo systemctl reload nginx
+   sudo certbot --nginx -d gielda.twojadomena.pl
+===============================================================================

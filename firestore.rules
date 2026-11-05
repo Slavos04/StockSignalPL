@@ -1,0 +1,115 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Default-deny all access
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isSignedIn() && (
+        request.auth.token.email == "slavos1mm@gmail.com" ||
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      );
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && (request.auth.uid == userId || isAdmin());
+    }
+
+    // Helper: Valid User Profile
+    function isValidUserProfile(data) {
+      return data.id is string && data.id.size() <= 128 &&
+             data.email is string && data.email.size() <= 128 &&
+             data.displayName is string && data.displayName.size() <= 128 &&
+             data.role in ['admin', 'trader', 'viewer'] &&
+             data.status in ['active', 'blocked'];
+    }
+
+    // Helper: Valid Portfolio
+    function isValidPortfolio(data, userId) {
+      return data.id is string && data.id.size() <= 128 &&
+             data.userId == userId &&
+             data.name is string && data.name.size() > 0 && data.name.size() <= 128 &&
+             data.riskLevel in ['Niskie', 'Umiarkowane', 'Wysokie', 'Arbitraż'] &&
+             data.currentBalance is number;
+    }
+
+    // Helper: Valid Trade
+    function isValidTrade(data, userId) {
+      return data.id is string && data.id.size() <= 128 &&
+             data.userId == userId &&
+             data.portfolioId is string && data.portfolioId.size() <= 128 &&
+             data.ticker is string && data.ticker.size() <= 32 &&
+             data.type in ['KUPNO', 'SPRZEDAŻ'] &&
+             data.pricePln is number &&
+             data.shares is number &&
+             data.totalPln is number;
+    }
+
+    // Helper: Valid Settings
+    function isValidSettings(data, userId) {
+      return data.userId == userId &&
+             data.theme in ['dark', 'light', 'ocean', 'forrest'] &&
+             data.refreshIntervalSec is number;
+    }
+
+    // Admins metadata collection
+    match /admins/{adminId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    // User profile and subcollections
+    match /users/{userId} {
+      allow get: if isOwner(userId);
+      allow list: if isAdmin();
+      allow create: if isSignedIn() && request.auth.uid == userId && isValidUserProfile(incoming());
+      allow update: if isOwner(userId) && isValidUserProfile(incoming()) && incoming().id == existing().id;
+      allow delete: if isAdmin();
+
+      // Portfolios subcollection
+      match /portfolios/{portfolioId} {
+        allow get: if isOwner(userId);
+        allow list: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidId(portfolioId) && isValidPortfolio(incoming(), userId);
+        allow update: if isOwner(userId) && isValidPortfolio(incoming(), userId) && incoming().id == existing().id && incoming().userId == existing().userId;
+        allow delete: if isOwner(userId);
+      }
+
+      // Trades subcollection
+      match /trades/{tradeId} {
+        allow get: if isOwner(userId);
+        allow list: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidId(tradeId) && isValidTrade(incoming(), userId);
+        allow update: if isOwner(userId) && isValidTrade(incoming(), userId) && incoming().id == existing().id && incoming().userId == existing().userId;
+        allow delete: if isOwner(userId);
+      }
+
+      // Settings subcollection
+      match /settings/{settingId} {
+        allow get: if isOwner(userId);
+        allow list: if isOwner(userId);
+        allow create, update: if isOwner(userId) && isValidSettings(incoming(), userId);
+        allow delete: if isOwner(userId);
+      }
+    }
+  }
+}

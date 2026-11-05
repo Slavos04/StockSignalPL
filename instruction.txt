@@ -1,0 +1,116 @@
+================================================================================
+INSTRUKCJA UŻYTKOWNIKA - STOCKSIGNALPL v1.5 (POLSKI RYNEK GIEŁDOWY GPW)
+Kontakt & Wsparcie: slavosmm@gmail.com
+================================================================================
+
+1. LOGOWANIE I KONTO ADMINISTRATORA:
+--------------------------------------------------------------------------------
+Dostęp do platformy jest chroniony przez pełnoekranową bramkę AuthGuard.
+Domyślne dane dostępowe do konta Administratora Głównego:
+   Login: admin
+   Hasło: Admin123!
+
+Dla szybkiego przetestowania można użyć przycisku na ekranie logowania:
+"Zaloguj jako Administrator (admin / Admin123!)".
+
+Rejestracja nowych użytkowników jest dostępna w zakładce "Rejestracja Konta".
+Każdy zarejestrowany użytkownik otrzymuje domyślnie rolę 'Trader'.
+
+
+2. PIĘĆ GŁÓWNYCH ZAKŁADEK PLATFORMY:
+--------------------------------------------------------------------------------
+
+A. ZAKŁADKA 1: PORTFELE STRATEGII (5-in-1):
+   - U góry znajduje się przełącznik 5 portfeli modelowych:
+     1) Konserwatywny WIG20 Blue Chips
+     2) Zrównoważony mWIG40 Growth
+     3) Agresywny sWIG80 & NewConnect
+     4) Dywidendowy GPW Dividend Aristocrats
+     5) Arbitraż FW20 Futures & Hedging
+   - Wykres krzywej kapitału porównuje wynik portfela ze stopą zwrotu Indeksu WIG20.
+   - W sekcji "Otwarte Pozycje" prezentowane są aktywne inwestycje z podziałem
+     na zlecenia Multi-TP (33/33/34):
+     * TP1 (+3.2%): zamknięcie 33% wolumenu, Stop Loss przestawia się na Break-Even.
+     * TP2 (+6.5%): zamknięcie kolejnych 33% wolumenu.
+     * TP3 (+11.8%): realizacja pozostałych 34% pozycji.
+   - Przycisk "Smart Rebalance": algorytmicznie dostosowuje wagi portfela
+     i zabezpiecza 20% kapitału w bezpiecznej gotówce PLN.
+   - Dziennik Tradera: tabela historii zleceń z możliwością filtrowania i przyciskiem
+     "Eksportuj do CSV", który pobiera plik CSV z polskimi znakami.
+
+
+B. ZAKŁADKA 2: ETAP 1 - AUDYT TRAFNOŚCI (10 ŹRÓDEŁ):
+   - Tabela prezentuje 10 darmowych źródeł sygnałów rynkowych dla GPW:
+     1. Stooq TA Screener (EMA 50/200 Złoty Krzyż, RSI, MACD)
+     2. Bankier & BiznesRadar Sentiment (Sentyment inwestorów detalicznych)
+     3. GPW WIG-VIX (Indeks strachu i zmienności)
+     4. GPW Volume & Order Flow (Wolumen obrotu vs średnia 30d, instytucje)
+     5. FW20 Futures Spread & Baza (Premia kontraktów futures)
+     6. Analizy Domów Maklerskich (Konsensus DM BOŚ, mBank, BM PKO, Noble)
+     7. NewConnect Growth Tracker (Momentum małych spółek)
+     8. ESPI / EBI Insiders Tracker (Transakcje zarządów z art. 19 MAR)
+     9. Dividend Yield Screener (Stopa dywidendy i bezpieczeństwo wypłat)
+     10. Candlestick Pattern Engine (Formacje świec japońskich)
+   - Każde źródło posiada suwak wagi (Weight %) w zakresie 1-30%.
+   - Inwestor może modyfikować wagi według własnych preferencji lub kliknąć
+     "Przywróć Domyślne Wagi".
+
+
+C. ZAKŁADKA 3: ETAP 2 - LIVE KONSENSUS:
+   - Wybór waloru za pomocą paska szybkich przycisków (PKN, KGH, PKO, CDR, DNP,
+     LPP, XTB, FW2020) lub listy rozwijanej z podziałem na rynki.
+   - Interaktywny wykres świecowy Recharts OHLC z wolumenem, średnimi kroczącymi SMA 20 (neon yellow) i SMA 50 (cyan) oraz zakresem 14D/30D/60D/90D.
+   - Dane historyczne pobierane są dynamicznie on-demand z proxy Stooq bez obciążania dysku serwera.
+   - Tarcza Konsensusu (%) z werdyktem: MOCNE KUPUJ / KUPUJ / NEUTRALNIE / SPRZEDAJ.
+   - Status AUTO-PILOT: Aktywuje się automatycznie, gdy zgodność wynosi >= 76%.
+   - Karta poziomów: Cena Wejścia, Stop Loss, TP1, TP2, TP3 oraz wskaźnik R:R.
+   - Przyciski akcji:
+     * "Wykonaj Zlecenie w Portfelu GPW" - natychmiast kupuje akcje do portfela.
+     * "Wyślij Alert do Telegram" - wysyła sformatowany alert na Twój kanał Telegram.
+     * "Kalkulator Wielkości" - przenosi do kalkulatora z wybranym walorem.
+
+
+D. ZAKŁADKA 4: RANKING SPÓŁEK & KALKULATOR:
+   - Ranking spółek z wyszukiwarką i filtrem segmentów: Wszystkie, WIG20, mWIG40,
+     sWIG80, NewConnect, FW20.
+   - Zaawansowany Kalkulator Wielkości Pozycji w PLN:
+     * Wprowadź kapitał (np. 50 000 zł)
+     * Wybierz ryzyko procentowe (np. 2%) lub włącz Model Kelly'ego
+     * Kalkulator automatycznie wyliczy dokładną liczbę akcji, wartość pozycji w PLN,
+       maksymalną stratę oraz zyski na każdym z 3 poziomów TP.
+     * Przycisk "Dodaj Pozycję do Portfela" zapisuje pozycję w wybranym portfelu.
+
+
+E. ZAKŁADKA 5: PANEL ADMINISTRATORA & USTAWIENIA:
+   - Zarządzanie użytkownikami:
+     * Edycja danych (login, e-mail, nazwisko, rola, status).
+     * Blokowanie / Odblokowanie dostępu do systemu.
+     * Jedno-klikowe resetowanie hasła do wartości domyślnej.
+     * Usuwanie niepotrzebnych kont.
+     * Przycisk "Dodaj Nowego Inwestora".
+   - Konfiguracja Telegram:
+     * Wprowadź Telegram Bot Token oraz Chat ID.
+     * Ustaw próg minimalny (domyślnie 76%).
+     * Przetestuj połączenie przyciskiem "Wyślij Testowy Alert".
+
+
+3. POWIADOMIENIA I WSKAŹNIK SENTYMENTU WIG MARKET:
+--------------------------------------------------------------------------------
+Na górnej belce aplikacji prezentowane są na żywo:
+- Kurs indeksu WIG20 w pkt oraz zmiana procentowa.
+- Kurs kontraktów terminowych FW20 Futures.
+- Poziom indeksu implikowanej zmienności WIG-VIX.
+- Wskaźnik sentymentu Optymizm Rynku GPW (%) z interaktywnym wykresem trendu.
+
+4. HARMONOGRAM SESJI GPW I ZASADY ODŚWIEŻANIA NOTOWAŃ:
+--------------------------------------------------------------------------------
+- Silnik StockSignalPl ściśle respektuje kalendarz sesji Giełdy Papierów Wartościowych:
+  * Notowania ciągłe: Poniedziałek – Piątek w godzinach 09:00 – 17:00.
+  * Dni wolne: weekendy (sobota, niedziela) oraz święta ustawowo wolne od handlu w Polsce.
+- Automatyczne odświeżanie notowań działa WYŁĄCZNIE podczas trwania sesji GPW.
+- Poza godzinami sesji automatyczne odświeżanie jest automatycznie WSTRZYMANE.
+- W dowolnej chwili dostępny jest przycisk "Stooq (Ręczne)", który pozwala wymusić
+  pobranie aktualnych kursów na życzenie użytkownika.
+- W Ustawieniach dostępny jest przełącznik "Wymuś aktywną sesję GPW (tryb testowy)"
+  umożliwiający testowanie auto-odświeżania poza godzinami parkietu.
+================================================================================

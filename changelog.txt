@@ -1,0 +1,408 @@
+================================================================================
+CHANGELOG - HISTORIA ZMIAN I WERSJI STOCKSIGNALPL
+================================================================================
+
+================================================================================
+Wersja 2.1 (2026-11-05) - Automatyzacja Feedów 24/7 (09:00 & 18:30), Panel Admina, Dynamiczny ATR SL/TP & Ochrona Danych
+================================================================================
+1. BEZOBSŁUGOWA SYNCHRONIZACJA FEEDÓW 24/7 (09:00 & 18:30 GPW):
+   - Wdrożono ciągły proces serwerowy (Cron Node.js) realizujący automatyczne pobieranie nowych rekomendacji 2 razy dziennie:
+     * 09:00 — tuż przed otwarciem sesji na GPW (po porannej fali biuletynów domów maklerskich).
+     * 18:30 — po popołudniowej fali komunikatów ESPI, EBI i podsumowaniach domów maklerskich.
+   - Zaawansowany algorytm unikalnej deduplikacji ('BROKER_TICKER_DATE') gwarantuje całkowity brak powielania wpisów.
+
+2. PRZENIESIENIE KONTROLI FEEDÓW DO PANELU ADMINISTRATORA:
+   - Dostęp do ręcznego wyzwalania pobierania danych z API, importu z ostatnich 30 dni oraz masowego parsera tekstu (Telegram / Discord / StockWatch Forum) został zarezerwowany wyłącznie dla Administratora (currentUser.role === 'admin').
+   - Użytkownicy końcowi (Traderzy / Viewery) posiadają czytelny widok w trybie 'Tylko do odczytu' w Etapie 1: Audyt Trafności, gdzie widzą wszystkie rekomendacje zaktualizowane na żywo.
+
+3. ADAPTACYJNY MECHANIZM ATR DLA DOKŁADNIEJSZYCH DANYCH SL I TP (HIT-RATE ENHANCEMENT):
+   - Wdrożono dynamiczne obliczanie Stop Loss (SL) oraz wartości docelowych Take Profit (TP1, TP2, TP3) na bazie wskaźnika zmienności ATR (Average True Range) dla poszczególnych spółek i surowców.
+   - Płynny bufor zmienności dostosowuje odległość SL do specyfiki waloru (węższe SL dla stabilnych spółek WIG20, szersze SL dla zmiennych spółek sWIG80/NewConnect oraz surowców), eliminując przypadkowe wybijanie zleceń obronnych przez rynkowy szum i drastycznie zwiększając skuteczność realizacji poziomów TP1/TP2/TP3.
+
+4. BEZPIECZEŃSTWO I DOKUMENTACJA SERWEROWA:
+   - Zaktualizowano instrukcje instalacyjne w pliku 'instalserver.txt' o konfigurację bezobsługowego procesu PM2/Systemd oraz harmonogramu zadań dla dystrybucji Linux / Ubuntu Server.
+
+================================================================================
+Wersja 2.0 (2026-11-05) - Przejście na 100% Dane Rzeczywiste (WSE GPW / NBP / COMEX) i Całkowite Usunięcie Symulacji Losowej
+================================================================================
+1. CAŁKOWITE WYELIMINOWANIE FAŁSZYWYCH DANYCH I GENERATORA LOSOWYCH TICKÓW:
+   - Całkowicie usunięto z silnika aplikacji losowy szum i funkcję sztucznych mikro-ruchów cenowych (Math.random).
+   - Wyceny spółek, bilanse portfeli, zyski/straty oraz poziomy Stop Loss i Take Profit bazują w 100% na autentycznych transakcjach rynkowych.
+   - Wyeliminowano zafałszowane sygnały – strategie i backtesty odzwierciedlają prawdziwy stan rynku.
+
+2. PODPIĘCIE REALNEGO FEEDU NOTOWAŃ GPW (WARSAW STOCK EXCHANGE):
+   - Wdrożono serwerowy silnik proxy łączący się bezpośrednio z rynkiem akcji GPW (symbole .WA, m.in. PKN, KGH, PKO, PZU, CDR, DNP, LPP, ALE, PEO, KRU, XTB, TPE, PGE, CPS, BDX, CAR, 11B, ACP, MIL, ENA, OPL, JSW, KTY, SAN).
+   - Prawdziwe kursy transakcyjne, realne dzienne wolumeny obrotu oraz oficjalne kursy odniesienia (Previous Close).
+   - Realne świece historyczne OHLC (Open, High, Low, Close, Volume) dla wszystkich interwałów (1D intraday 5m/15m, 1W, 2W, 1M, 3M, 6M, 1Y).
+
+3. OFICJALNA TABELA KURSÓW NBP I REALNE SUROWCE ŚWIATOWE:
+   - Bezpośrednia integracja z publicznym API Narodowego Banku Polskiego (NBP) w celu pobierania oficjalnego kursu średniego USD/PLN.
+   - Realne notowania kontraktów surowcowych z giełd COMEX / NYMEX (Złoto GC=F, Srebro SI=F, Ropa Brent BZ=F, Ropa WTI CL=F, Gaz Ziemny NG=F, Miedź HG=F, Platyna PL=F, Pszenica ZW=F) z automatycznym, precyzyjnym przeliczeniem na złote (PLN).
+
+4. RZECZYWISTY WSKAŹNIK SENTYMENTU I BENCHMARK WIG20:
+   - Wskaźnik „Optymizm Rynku GPW” kalkulowany na żywo z realnego bilansu spółek rosnących i spadających na parkiecie oraz pozycji WIG20 względem średnich kroczących.
+   - Realna wycena indeksu WIG20 (WIG20.WA) i kontraktów terminowych FW20.
+   - Nowy znacznik „100% Dane Rzeczywiste (GPW / NBP)” na górnej belce aplikacji potwierdzający brak symulacji.
+
+================================================================================
+Wersja 1.9 (2026-11-05) - Zbiorczy Wykres Portfeli (PLN i %), Ręczne Zamykanie Pozycji, Ticker GPW i Surowce ($/zł) oraz Interaktywne Tooltipy Sentymentu
+================================================================================
+1. ZBIORCZY WIDOK „WSZYSTKIE PORTFELE” I WIELOLINIOWY WYKRES PORÓWNAWCZY (W ZŁ I %):
+   - Wdrożono nowy kafelek „Wszystkie Portfele (Zbiorczo)” na początku poziomego menu wyboru portfeli z łącznym saldem funduszu w PLN i sumaryczną stopą zwrotu.
+   - Zaawansowany wieloliniowy wykres Recharts prezentujący symultanicznie krzywe kapitału wszystkich portfeli modelowych GPW oraz linię benchmarku WIG20.
+   - Błyskawiczny przełącznik jednostek: Wartość w zł (PLN) vs Stopa zwrotu (%).
+   - Pełna obsługa filtrów zakresu czasowego: 1D (sesja dzisiejsza), 3D (ostatnie 3 sesje), 1W, 2W, 1M, 3M, 6M oraz Wszystkie.
+   - Bogaty Custom Tooltip na hover pokazujący wyceny i stopy zwrotu wszystkich strategii jednocześnie.
+   - Kafelki podsumowania funduszu (Łączny Kapitał, Zysk, Rezerwa Gotówkowa, Portfel Lider, Aktywne Pozycje) oraz szczegółowa tabela porównawcza z bezpośrednią nawigacją.
+
+2. RĘCZNE ZAMYKANIE POZYCJI („ZAMKNIJ”) W TABELACH OTWARTYCH POZYCJI:
+   - Dodano kolumnę 'Akcja' z przyciskiem „Zamknij” przy każdej aktywnej pozycji (w widoku pojedynczego portfela oraz w widoku zbiorczym funduszu).
+   - Dialog potwierdzenia ze szczegółowym podsumowaniem wolumenu, kursu rynkowego, wartości i szacowanego PnL.
+   - Pełna integracja z silnikiem portfolioService: natychmiastowe zasilenie gotówki portfela (cashPln), aktualizacja salda, usunięcie pozycji, rejestracja zrealizowanego zlecenia w Dzienniku Tradera i konfetti sukcesu przy zysku.
+
+3. PEŁNOSZEROKOŚCIOWY TICKER NOTOWAŃ „GPW I SUROWCE” Z CENAMI W $ I ZŁ:
+   - Nowa architektura górnego paska: Wiersz 1 ze statusem sesji GPW i Optymizmem rynku + Wiersz 2 na pełną szerokość strony (w-full) z płynnym tickerem notowań.
+   - Notowania surowców podają teraz w pierwszej kolejności cenę w dolarach ($) oraz przeliczenie w PLN (zł):
+     * Złoto Spot (XAU): $2 745.20 (10 850 zł),
+     * Srebro Spot (XAG): $32.80 (129.50 zł),
+     * Ropa Naftowa Brent (OIL): $76.40 (312.50 zł),
+     * Ropa Naftowa WTI (CL): $72.15 (294.80 zł),
+     * Miedź, Platyna, Gaz Ziemny, Pszenica.
+   - W tabelach otwartych pozycji portfeli przy walorach surowcowych wyświetla się również cena w dolarach ($).
+   - Indeksy GPW (WIG20, FW20 Futures, mWIG40, sWIG80, WIG-VIX) oraz kursy spółek z portfeli z pauzą po najechaniu myszą (pause-on-hover).
+
+4. INTERAKTYWNE TOOLTIPY I DYMKI OBJAŚNIAJĄCE W OKNIE „OPTYMIZM RYNKU GPW”:
+   - Zastąpiono statyczny wykres SVG responsywnym wykresem Recharts AreaChart z dymkiem (Tooltip) pojawiającym się przy najechaniu na dowolny punkt w czasie.
+   - Dodano przełącznik widoku: 14 sesji (dzienny trend EOD) vs Dziś (Live intraday z podziałem na godziny sesji 09:00 - 17:00).
+   - Wdrożono szczegółowe dymki objaśniające (z ikonami pomocniczymi '?' i kartami hover) dla:
+     * Plakietki sentymentu 68% (Hossa / Chciwość) – interpretacja fazy rynku i zalecenia dla tradera,
+     * Kafelka Aktualny Poziom – algorytm 4 wag rynkowych GPW (SMA50/200, WIG-VIX, Advance/Decline, wolumen),
+     * Kafelka Indeks Strachu (WIG-VIX) – implikowana 30-dniowa zmienność opcji na WIG20 i strefy ryzyka,
+     * Kafelka WIG20 Benchmark – znaczenie 20 największych spółek blue-chip dla rynku.
+
+5. DETERMINISTYCZNE WYKRESY ŚWIECOWE (OHLC) DLA POJEDYNCZYCH WALORÓW:
+   - Rozwijany mini-wykres świecowy (OHLC) pod każdym walorem w tabeli pozycji z poziomami Wejścia, SL i Multi-TP (TP1, TP2, TP3).
+   - Wdrożenie deterministycznego pseudo-generatora liczb losowych (seededRandom), gwarantującego brak drgania i przeskakiwania świec przy ruchach myszy i re-renderach.
+   - Przełącznik stylów: Świecowy (OHLC) / Liniowy oraz pełne zakresy czasowe 1D, 3D, 1W, 2W, 1M, 3M, 6M, Wszystkie.
+
+================================================================================
+Wersja 1.8 (2026-11-04) - Moduł Analizy i Tradingu na Rynku Surowców & Portfele Safe Haven
+================================================================================
+1. PEŁNA INTEGRACJA RYNKU SUROWCOW & METALI SZLACHETNYCH:
+   - Zaimplementowano kompleksową bazę surowcową (z notowaniami przeliczanymi na PLN):
+     * Złoto Spot (XAU.PL - 1 oz troy) – kluczowy aktyw bezpiecznej przystani (Safe Haven),
+     * Ropa Naftowa Brent (CB.F - 1 bbl) – benchmark ropy z Morza Północnego,
+     * Ropa Naftowa WTI (CL.F - 1 bbl) – benchmark ropy amerykańskiej Texas Light,
+     * Platyna Spot (XPT.PL - 1 oz) – metal szlachetny i kluczowy surowiec przemysłowy,
+     * Srebro Spot (XAG.PL - 1 oz) – metal szlachetny oraz komponent fotowoltaiki,
+     * Miedź COMEX (HG.F - 1 lb) – wskaźnik koniunktury ("Doktor Miedź") i transformacji EV,
+     * Gaz Ziemny (NG.F - Henry Hub) – kluczowy surowiec grzewczy i elektroenergetyczny,
+     * Pszenica CBOT (W.F - 1 bu) – bazowy surowiec rolny i bezpieczeństwa żywnościowego.
+
+2. ANALIZA TECHNICZNA, FORMACJE ŚWIECOWE I KONSENSUS DLA SUROWCÓW:
+   - Wszystkie 10 algorytmów konsensusu (Stooq TA Screener, RSI14, MACD, Złoty Krzyż SMA50/SMA200,
+     formacje świecowe Młot, Objęcie Hossy, itp.) działają identycznie i w czasie rzeczywistym
+     dla surowców i metali.
+   - Wykres świecowy Recharts OHLC umożliwia badanie historii, średnich kroczących SMA20/SMA50
+     i dynamiki cenowej surowców w locie (0 MB narzutu na bazę danych).
+
+3. NOWY PORTFEL MODELOWY: "PORTFEL SUROWCE & SAFE HAVEN" (6-IN-1):
+   - Wdrożono 6. modelowy portfel z aktywnymi pozycjami w Złocie, Ropie Brent, Platynie i Pszenicy.
+   - Pełna obsługa mechanizmu Multi-TP (33/33/34), automatycznego podciągania Stop Loss na Break-Even
+     oraz ochrony kapitału przed inflacją.
+   - Możliwość tworzenia portfeli dedykowanych czysto surowcowych lub portfeli mieszanych (akcje GPW + surowce).
+
+4. FILTROWANIE I INTUICYJNA NAWIGACJA W KONSENSUSIE I KALKULATORZE:
+   - W zakładce Live Konsensus i w Rankingu dodano dedykowany filtr 'Surowce & Metale',
+     umożliwiający natychmiastowe przełączanie między rynkami akcji GPW a rynkiem surowcowym.
+   - W kalkulatorze pozycji zaktualizowano etykiety, umożliwiając precyzyjną symulację wolumenu
+     i ryzyka w PLN dla kontraktów surowcowych.
+
+================================================================================
+Wersja 1.7 (2026-11-04) - Lokalna Baza Danych PostgreSQL, Docker & Docker Compose dla Serwera Ubuntu
+================================================================================
+1. PRZEJŚCIE NA LOKALNĄ BAZĘ DANYCH POSTGRESQL NA WŁASNYM SERWERZE UBUNTU:
+   - Całość bazy danych (konta użytkowników, portfele, pozycje akcyjne, dziennik tradera
+     oraz ustawienia) działa w lokalnym silniku PostgreSQL 16.
+   - Użytkownik zachowuje pełną kontrolę i suwerenność nad swoimi danymi.
+
+2. CAŁKOWICIE TRANSPARENTNE DZIAŁANIE BEZ PRZYCISKÓW SYNCHRONIZACJI:
+   - Usunięto zbędne przyciski i etykiety synchronizacji w chmurze. Użytkownik nie musi
+     pamiętać o żadnej synchronizacji – po zalogowaniu na dowolnym urządzeniu (telefon,
+     tablet, komputer) dane są automatycznie odczytywane i zapisywane bezpośrednio
+     w bazie PostgreSQL na serwerze Ubuntu.
+
+3. KONTENERYZACJA DOCKER I DOCKER COMPOSE:
+   - Przygotowano wieloetapowy plik 'Dockerfile' optymalizujący kompilację Node.js i Vite.
+   - Przygotowano plik 'docker-compose.yml' definiujący usługi:
+     * stocksignalpl-postgres (PostgreSQL 16 Alpine z trwałym wolumenem postgres_data),
+     * stocksignalpl-app (Node.js/Express na porcie 3000 powiązany siecią wewnętrzną).
+   - Wdrożenie na serwerze Ubuntu sprowadza się do jednego polecenia:
+     'docker compose up -d --build'.
+   - Utworzono plik skryptu inicjalizacji bazy danych 'init.sql'.
+
+4. AKTUALIZACJA DOKUMENTACJI WDROŻENIOWEJ:
+   - Zaktualizowano instrukcję instalacji w pliku 'instalserver.txt' z pełnymi krokami
+     dla Ubuntu, Docker Compose, Nginx Reverse Proxy oraz bezpłatnego certyfikatu SSL.
+
+================================================================================
+Wersja 1.6 (2026-11-04) - Baza Danych w Chmurze (Firebase Firestore) & Logowanie z Różnych Urządzeń
+================================================================================
+1. LOGOWANIE Z DOWOLNYCH URZĄDZEŃ (MULTI-DEVICE ACCESS):
+   - Wdrożono bezpieczne logowanie za pomocą konta Google (Firebase Authentication),
+     umożliwiając inwestorowi logowanie się z wielu urządzeń jednocześnie (smartfon,
+     tablet, laptop, komputer stacjonarny).
+   - Zachowano opcję szybkiego logowania lokalnego dla testów oraz użytkowników offline.
+
+2. PEŁNA SYNCHRONIZACJA PORTFELI I TRANSAKCJI W CHMURZE (FIRESTORE):
+   - Zintegrowano bezserwerową bazę danych w chmurze Google Cloud / Firebase Firestore
+     o zerowym narzucie na dysk serwera (lekkie, darmowe instancje bezobsługowe).
+   - Dane inwestora są bezpiecznie odizolowane na poziomie reguł bezpieczeństwa Firestore:
+     * Portfele modelowe i własne strategie (/users/{userId}/portfolios/{portfolioId}),
+     * Dziennik transakcji Tradera (/users/{userId}/trades/{tradeId}),
+     * Ustawienia interfejsu i preferencje motywu (/users/{userId}/settings/app).
+   - Dwukierunkowa synchronizacja w czasie rzeczywistym (Real-time listener onSnapshot):
+     zmiany wprowadzone na telefonie pojawiają się natychmiast na ekranie komputera.
+
+3. WSKAŹNIK STANU SYNCHRONIZACJI W CHMURZE W PASKU GÓRNYM:
+   - W belce nawigacyjnej dodano dedykowaną etykietę "Sync Chmura (Multi-Device)"
+     z pulsującą zieloną diodą statusu, informującą o aktywnym połączeniu z bazą.
+
+4. BEZPIECZEŃSTWO ZGODNE ZE STANDARDEM ABAC & ZERO-TRUST:
+   - Zaimplementowano rygorystyczne reguły bezpieczeństwa (firestore.rules)
+     z walidacją typów pól, limitów długości stringów i blokadą nieautoryzowanego dostępu.
+   - Uprawnienia administratora powiązane z dedykowanym adresem e-mail.
+
+================================================================================
+Wersja 1.5 (2026-11-04) - Oficjalne Logo Tarczy, Barwy Zielono-Żółte, Wykres Świecowy Recharts OHLC & Optymalizacja Bazy
+================================================================================
+1. NOWE OFICJALNE LOGO GIEŁDOWE (LOGO.PNG):
+   - Wdrożono nową grafikę tarczy z zielonym bykiem i złotymi akcentami (logo.png).
+   - Tytuł aplikacji sformatowano w kontrastowych barwach zieleni i żółci:
+     'Stock' (neon emerald) + 'Signal' (neon gold/yellow) + 'PL' (neon emerald).
+   - Zaktualizowano identyfikator wersji na v1.5.
+
+2. PEŁNA RESTRUKTURYZACJA KOLORYSTYKI (NEON ZAMIAST CZERWIENI):
+   - Czerwone elementy interfejsu (pochodzące z pierwotnego motywu kryptowalut)
+     zostały zastąpione nowoczesnymi akcentami neonowej zieleni (emerald) i błękitu.
+   - Kolor czerwony/różowy został ściśle zachowany wyłącznie w sytuacjach ostrzegawczych
+     oraz rynkowych:
+     * Spadki kursów akcji i ujemna zmiana dzienna (change < 0),
+     * Strata kapitałowa PnL pozycji i portfela,
+     * Zlecenia obronne Stop Loss (SL),
+     * Formacje i sygnały podażowe (bessa / SPRZEDAJ),
+     * Przyciski nieodwracalnego usuwania konta lub portfela.
+
+3. MINIMALNY ROZMIAR APLIKACJI I BAZY DANYCH (0 MB NA DYSKU SERWERA):
+   - Przeprowadzono audyt architektury pod kątem minimalnego zużycia zasobów serwera:
+     * Żadne duże bazy danych, zrzuty notowań ani archiwalne pliki CSV nie są
+       zapisywane na stałe na serwerze.
+     * Wszystkie kursy i świece pobierane są dynamicznie w locie (on-demand)
+       przez proxy Stooq i przetwarzane w strumieniu.
+     * Profile inwestorów, ustawienia i dziennik transakcji zapisywane są lokalnie
+       w lekkiej pamięci przeglądarki, gwarantując zerowy narzut na bazę serwera.
+
+4. W PEŁNI INTERAKTYWNY WYKRES ŚWIECOWY RECHARTS OHLC W ETAPIE 2 (KONSENSUS):
+   - W module TabConsensus zintegrowano profesjonalny wykres świecowy oparty na
+     bibliotece Recharts (ComposedChart ze spersonalizowanymi kształtami świec i wolumenu).
+   - Wykres prezentuje:
+     * Świece OHLC (Otwarcie, Najwyższy, Najniższy, Zamknięcie) w barwach hossy i bessy,
+     * Podwykres wolumenu sesyjnego,
+     * Średnie kroczące SMA 20 (neon yellow) oraz SMA 50 (cyan) z możliwością włączania,
+     * Przełącznik horyzontu czasowego: 14D, 30D, 60D, 90D,
+     * Bogaty tooltip ze szczegółami każdej sesji giełdowej GPW.
+
+5. DANE KONTAKTOWE W OKNIE INFORMACYJNYM:
+   - Dodano oficjalne dane kontaktowe: Kontakt: slavosmm@gmail.com
+
+================================================================================
+Wersja 1.4 (2026-11-04) - Harmonogram Sesji GPW (Dni Wolne & Godziny) & Spójna Stylistyka Ikony Ustawień
+================================================================================
+1. ZMIANA KOLORYSTYKI IKONY ZĘBATKI (USTAWIENIA):
+   - Zmieniono kolor ikony zębatki (Settings) z czerwonego (rose-400) na elegancki,
+     spójny błękitny odcień (sky-400) identyczny jak ikona informacji 'i'.
+   - Oba przyciski posiadają teraz identyczną stylistykę (ciemne tło slate-800,
+     jasnoszarą ramkę slate-700 i dopasowane ikony funkcyjne).
+
+2. INTELIGENTNY MECHANIZM DETEKCJI SESJI GIEŁDOWEJ GPW WARSZAWA:
+   - Wdrożono dedykowany moduł 'MarketSessionService' precyzyjnie analizujący czas
+     rynku warszawskiego ('Europe/Warsaw'):
+     a) Godziny notowań ciągłych: 09:00 - 17:00 (poniedziałek - piątek).
+     b) Faza przed otwarciem (fixing): 08:30 - 09:00.
+     c) Faza zamknięcia i dogrywki: 17:00 - 17:10.
+     d) Stan po sesji: 17:10 - 23:59 oraz przed sesją 00:00 - 08:30.
+   - Pełna obsługa dni wolnych i świąt w Polsce:
+     * Dni weekendowe (sobota / niedziela).
+     * Święta stałe (Nowy Rok, Trzech Króli, Święto Pracy, Konstytucji 3 Maja,
+       Wniebowzięcie NMP, Wszystkich Świętych, Święto Niepodległości, Wigilia,
+       Boże Narodzenie, Sylwester).
+     * Święta ruchome wyliczane algorytmem Computus (Wielki Piątek - brak sesji,
+       Poniedziałek Wielkanocny, Boże Ciało).
+
+3. KONTROLA AUTOMATYCZNEGO ODŚWIEŻANIA NOTOWAŃ:
+   - Automatyczne odświeżanie notowań Stooq i kursów spółek działa WYŁĄCZNIE
+     w trakcie trwania aktywnej sesji GPW (09:00 - 17:00 w dni robocze).
+   - Gdy giełda jest zamknięta (po godzinach, w weekend lub święto), automatyczne
+     odświeżanie zostaje natychmiast WSTRZYMANE (licznik nie odlicza, notowania
+     są stabilnie zamrożone).
+   - W górnej belce wyświetlany jest czytelny status sesji z kolorową diodą:
+     * Zielona pulsująca dioda: "Sesja GPW: Otwarta" + licznik auto-odświeżania.
+     * Bursztynowa dioda: "GPW: Zamknięta / Weekend / Święto" + informacja o dacie
+       i godzinie kolejnej sesji oraz etykieta "Auto: Wstrzymane".
+   - Ręczne odświeżanie przyciskiem "Stooq (Ręczne)" pozostaje aktywne przez cały czas,
+     umożliwiając pobranie ostatnich kursów na żądanie.
+
+4. OPCJONALNY TRYB TESTOWY W USTAWIENIACH:
+   - W oknie Ustawień w sekcji odświeżania dodano przełącznik "Wymuś aktywną sesję GPW (tryb testowy)",
+     pozwalający na przetestowanie automatycznego przeliczania również poza godzinami sesji.
+
+================================================================================
+Wersja 1.3 (2026-11-04) - Suwaki Tła (Jasność & Blur), Ocena Trendu, Rekomendacje, Formacje Świecowe & Duże Logo
+================================================================================
+1. OBNIŻENIE OKNA MODALNEGO OPTYMIZMU RYNKU:
+   - Skorygowano pozycję okna modalnego wykresu trendu 'Optymizm Rynku GPW',
+     obniżając je z samej góry ekranu (dodano margines pt-16 / pt-20, wyśrodkowanie pionowe
+     oraz obsługę przewijania overflow-y-auto).
+   - Przycisk zamknięcia 'X' oraz stopka są teraz w 100% dostępne i klikalne na każdym ekranie.
+
+2. SUWAKI DO ZDJĘCIA W TLE: PRZEZROCZYSTOŚĆ / JASNOŚĆ ORAZ ROZMYCIE (BLUR):
+   - W sekcji ustawień tła dodano dwa precyzyjne suwaki:
+     a) Widoczność / Jasność Tła (od 20% do 100%) - eliminuje efekt zbyt ciemnego tła,
+        pozwalając użytkownikowi ustawić idealny poziom widoczności zdjęcia.
+     b) Efekt Rozmycia (Blur od 0px do 20px) - pozwala zachować ostrość zdjęcia (0px)
+        lub nadać nowoczesny fintechowy efekt glassmorphism (5-15px).
+
+3. OCENA TRENDU, REKOMENDACJE BIUR MAKLERSKICH I FORMACJE ŚWIEC JAPOŃSKICH:
+   - W tabeli Rankingu Spółek oraz w Etapie 2 Konsensusu dodano 3 kluczowe parametry:
+     a) Ocena Trendu GPW: siła i kierunek (Bardzo silny wzrostowy, Wzrostowy, Boczny,
+        Spadkowy, Silny spadkowy) wraz z punktacją 0-100 pkt wyliczaną ze średnich SMA50,
+        SMA200, wskaźnika RSI14 i MACD.
+     b) Rekomendacja Biur Maklerskich (KUPUJ / AKUMULUJ / TRZYMAJ / REDUKUJ / SPRZEDAJ)
+        wraz z konsensusem ceny docelowej w PLN.
+     c) Analiza i Ocena Formacji Świecowych: wykrywanie i klasyfikacja formacji świecowych
+        (Młot, Odwrócony Młot, Objęcie Hossy, Spadająca Gwiazda, Wisielec, Objęcie Bessy,
+        Trzy Białe Żołnierze, Doji Ważka, Doji Nagrobek) z podziałem na sygnały Bycze i Niedźwiedzie.
+   - Dodano pełne sortowanie tabeli po Ocenie Trendu, Rekomendacjach oraz Formacjach Świecowych.
+
+4. DUŻE, WYRAŹNE LOGO GIEŁDOWE (BYK & NIEDŹWIEDŹ):
+   - Przeprojektowano i powiększone logo w belce górnej. Zwierzęta Byk (hossa/zielony)
+     i Niedźwiedź (bessa/czerwony) są znacznie większe, mają wyraziste rogi, paszcze,
+     kły oraz złoty piorun rynkowy z efektem świecenia (glow).
+
+================================================================================
+Wersja 1.2 (2026-11-04) - Motywy Kafelków, Tło z Dysku, Optymizm Rynku & Logo Byk/Niedźwiedź
+================================================================================
+1. ZMIANA KOLORU KAFELEK W MOTYWACH (FORREST, OCEAN, LIGHT):
+   - Wdrożono precyzyjne reguły arkusza stylów index.css dla motywów Forrest, Ocean oraz Light.
+   - W motywie Forrest wszystkie karty i panele przyjmują głęboką leśną zieleń (#0b291c / #061c12)
+     z dopasowanymi ciemnozielonymi obramowaniami (#1a583c).
+   - W motywie Ocean karty przyjmują elegancki błękit morski (#0b2540 / #061729) z morskimi ramkami (#1b4975).
+   - W motywie Light kafelki uzyskują czystą biel (#ffffff / #f8fafc), czarne/granatowe napisy
+     i wyraziste szare obramowania (#cbd5e1).
+
+2. NAPRAWA WGOTOWYWANIA TŁA Z DYSKU (CANVAS RESIZING):
+   - Rozwiązano problem braku reakcji przy wgrywaniu dużych zdjęć z dysku.
+   - Silnik wykorzystuje teraz kompresję Canvas do 1920x1080 (JPEG jakość 82%), mieszcząc się
+     w limicie pamięci podręcznej przeglądarki bez generowania błędu QuotaExceededError.
+   - Nowe tło aplikowane jest natychmiast po wybraniu pliku lub po kliknięciu 'Zastosuj Tło'.
+   - Kliknięcie 'Zapisz Wszystkie Ustawienia' powoduje natychmiastowe automatyczne zamknięcie okna modalnego.
+
+3. DEDYKOWANY PRZYCISK TESTU TELEGRAM W USTAWIENIACH:
+   - W sekcji bota Telegram w oknie ustawień dodano widoczny przycisk 'Testuj Bot'.
+   - Użytkownik otrzymuje natychmiastowy status testu w interfejsie.
+
+4. PONOWNE PRZELICZANIE ŹRÓDEŁ W ETAPIE 1:
+   - W sekcji 'Etap 1: Audyt Trafności' dodano zielony przycisk 'Przelicz Wszystkie Źródła Ponownie'.
+   - Umożliwia dynamiczne przeliczenie trafności, liczby sygnałów i współczynnika Profit Factor.
+
+5. WARTOŚĆ PROCENTOWA ZMIANY PRZY NOTOWANIACH:
+   - Na pasku szybkiego wyboru walorów oraz na liście rozwijanej dodano wartość procentową
+     zmiany dziennej dla każdej spółki (np. 'PKN: 68.40 zł (+1.85%)').
+
+6. 'OPTYMIZM RYNKU' (%) I INTERAKTYWNY WYKRES TRENDU:
+   - Wskaźnik 'Sentyment' został zastąpiony przez 'Optymizm rynku' z wartością procentową (np. 68%).
+   - Kliknięcie we wskaźnik na belce otwiera interaktywne okno z wykresem trendu 14 sesji,
+     danymi WIG-VIX oraz opisem stref sentymentu GPW.
+
+7. NOWE LOGO BYK & NIEDŹWIEDŹ (BULL & BEAR):
+   - Wdrożono nowe logo wektorowe SVG z symbolem Byka (zielony, hossa), Niedźwiedzia (czerwony, bessa)
+     i złotego pioruna dynamiki rynkowej.
+
+================================================================================
+Wersja 1.1 (2026-11-04) - Aktualizacja Funkcjonalna & Personalizacja UI
+================================================================================
+1. ZARZĄDZANIE PORTFELAMI (DODAWANIE I USUWANIE):
+   - Dodano przycisk '+' w selektorze portfeli umożliwiający tworzenie nowych
+     portfeli inwestycyjnych z indywidualnym profilem ryzyka (Niskie, Umiarkowane,
+     Wysokie, Arbitraż), nazwą, opisem i kapitałem początkowym w PLN.
+   - W każdym portfelu dodano dedykowany przełącznik Auto-Pilot (ON/OFF)
+     oraz powiadomień Telegram (ON/OFF) dla pełnej niezależności strategii.
+   - Dodano możliwość bezpiecznego usuwania portfela (z zabezpieczeniem min. 1 portfela w systemie).
+
+2. NOWE MOTYWY GRAFICZNE & WŁASNE TŁO:
+   - Dodano 4 kompleksowe motywy: Ciemny (Dark), Jasny (Light GPW), Ocean (Niebieski/Morski)
+     oraz Forrest (Leśny/Szmaragdowy) z pełnym dopasowaniem kolorów kart, tekstu i tabel.
+   - Wprowadzono opcję ładowania własnego tła z adresu URL (link) lub z pliku lokalnego
+     (PNG, JPG, WEBP) wraz z przyciskiem 'Zastosuj Tło' i 'Wyczyść Tło'.
+
+3. ANALIZA NOWYCH WALORÓW GPW:
+   - Dodano moduł '+ Dodaj Nowy Walor GPW / Stooq' w rankingu i konsensusie.
+   - Możliwość natychmiastowego dodawania dowolnych spółek z WIG20, mWIG40, sWIG80,
+     NewConnect oraz instrumentów pochodnych z automatycznym wyliczaniem wskaźników.
+
+4. TABELE: ZAMROŻONA PIERWSZA KOLUMNA I SORTOWANIE:
+   - We wszystkich tabelach pierwsza kolumna jest nieruchoma (sticky/pinned)
+     podczas poziomego przewijania na mniejszych ekranach.
+   - Wdrożono dwukierunkowe sortowanie (rosnąco/malejąco) po kliknięciu w nagłówki.
+
+5. PRZEWIJANIE POZIOME Z PRZYCISKAMI < I >:
+   - Na wszystkich listach kafelków (selektor portfeli, szybkie tickery, pasek górny,
+     segmenty rynku) dodano przyciski nawigacyjne '<' i '>' dla wygodnego przewijania.
+
+6. LICZNIK I USTAWIENIE CZASU ODŚWIEŻANIA NOTOWAŃ:
+   - Obok przycisku Stooq dodano dynamiczny licznik odliczający sekundy do kolejnego
+     odświeżenia notowań (np. 'Odświeżenie za: 3s').
+   - Dodano konfigurację interwału odświeżania (2s, 3s, 5s, 10s, 30s, 60s).
+
+7. TOOLTIPY I INFORMACJE O SYSTEMIE:
+   - Dodano szczegółowe tooltipy objaśniające działanie każdego wskaźnika i funkcji.
+   - Na belce górnej dodano ikonę 'i' (Informacje i Changelog) oraz zębatkę (Ustawienia).
+
+================================================================================
+Wersja 1.0 (2026-11-04) - Oficjalne Wydanie StockSignalPl
+================================================================================
+1. KONFIGURACJA, BRANDING I JEDNOSTKI:
+   - Zmiana nazwy aplikacji na "StockSignalPl v1.0".
+   - Przejście na walutę główną: PLN (złoty polski) w całym systemie (portfele,
+     kalkulator, transakcje, zlecenia, notowania) zamiast USD ($).
+   - Nowy indeks benchmarkowy: Indeks WIG20 (zamiast BTC).
+   - Nowy wskaźnik nastrojów rynku: WIG Market Fear & Greed zintegrowany
+     z indeksem implikowanej zmienności GPW WIG-VIX (zamiast Crypto Fear & Greed).
+
+2. INTEGRACJA NOTOWAŃ I STOOQ DATA FEED:
+   - Zastąpienie Binance API bezpłatnymi notowaniami giełdowymi GPW Stooq
+     (format tickerów: PKN.PL, KGH.PL, PKO.PL, CDR.PL, DNP.PL, LPP.PL, SPL.PL,
+     PZU.PL, ALR.PL, KRU.PL, KTY.PL, JSB.PL, XTB.PL, TPE.PL, CPS.PL, PGE.PL,
+     BDX.PL, MBI.PL, OPL.PL, FW2020.PL oraz spółki z NewConnect: BIO.PL, CLD.PL).
+   - Implementacja wbudowanego serwerowego proxy w Vite (/api/stooq).
+   - Wbudowany silnik żywych mikroticków symulujący sesję giełdową GPW w czasie rzeczywistym.
+
+3. ADAPTACJA 10 ŹRÓDEŁ SYGNAŁÓW DO SPECYFIKI AKCJI GPW (ETAP 1 I ETAP 2):
+   - Stooq TA Screener, Bankier & BiznesRadar Sentiment, GPW WIG-VIX,
+     GPW Volume & Order Flow, FW20 Futures Spread, Analizy Domów Maklerskich,
+     NewConnect Growth Tracker, ESPI/EBI Insiders Tracker, Dividend Yield Screener,
+     Candlestick Pattern Engine.
+
+4. PORTFELE STRATEGII (5-in-1):
+   - Konserwatywny WIG20, Zrównoważony mWIG40, Agresywny sWIG80/NewConnect,
+     Dywidendowy GPW Aristocrats, Arbitraż FW20 Futures.
+   - Multi-TP (33/33/34), Smart Rebalance, Dziennik Tradera z eksportem CSV.
+
+5. SYSTEM KONT I PANEL ADMINISTRATORA:
+   - Pełnoekranowy AuthGuard z motywem GPW Warszawa.
+   - Domyślny Administrator: admin / Admin123!
+   - Panel z pełną edycją użytkowników, blokowaniem, resetem haseł i usuwaniem kont.
+
+6. KALKULATOR ZARZĄDZANIA RYZYKIEM W PLN:
+   - Obliczanie pozycji z użyciem stałego ryzyka (1%-5%) lub modelu Kelly'ego.
+================================================================================

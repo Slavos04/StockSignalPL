@@ -1,0 +1,233 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "User account profile and role information",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "email": {
+          "type": "string",
+          "format": "email",
+          "maxLength": 128
+        },
+        "displayName": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "role": {
+          "type": "string",
+          "enum": ["admin", "trader", "viewer"]
+        },
+        "status": {
+          "type": "string",
+          "enum": ["active", "blocked"]
+        },
+        "createdAt": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "updatedAt": {
+          "type": "string",
+          "maxLength": 64
+        }
+      },
+      "required": ["id", "email", "displayName", "role", "status"]
+    },
+    "UserPortfolio": {
+      "title": "UserPortfolio",
+      "description": "Portfolio strategy with balance, positions, and settings",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "userId": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "name": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "shortDesc": {
+          "type": "string",
+          "maxLength": 256
+        },
+        "riskLevel": {
+          "type": "string",
+          "enum": ["Niskie", "Umiarkowane", "Wysokie", "Arbitraż"]
+        },
+        "initialCapital": {
+          "type": "number"
+        },
+        "currentBalance": {
+          "type": "number"
+        },
+        "allocatedPln": {
+          "type": "number"
+        },
+        "cashPln": {
+          "type": "number"
+        },
+        "totalProfitPln": {
+          "type": "number"
+        },
+        "totalProfitPercent": {
+          "type": "number"
+        },
+        "benchmarkReturnWig20": {
+          "type": "number"
+        },
+        "alpha": {
+          "type": "number"
+        },
+        "tradesCount": {
+          "type": "number"
+        },
+        "winRate": {
+          "type": "number"
+        },
+        "autoPilotEnabled": {
+          "type": "boolean"
+        },
+        "telegramEnabled": {
+          "type": "boolean"
+        },
+        "isCustom": {
+          "type": "boolean"
+        },
+        "updatedAt": {
+          "type": "string",
+          "maxLength": 64
+        }
+      },
+      "required": ["id", "userId", "name", "riskLevel", "currentBalance"]
+    },
+    "UserTrade": {
+      "title": "UserTrade",
+      "description": "Executed trade record in the Trader Journal",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "userId": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "portfolioId": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "ticker": {
+          "type": "string",
+          "maxLength": 32
+        },
+        "name": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "type": {
+          "type": "string",
+          "enum": ["KUPNO", "SPRZEDAŻ"]
+        },
+        "pricePln": {
+          "type": "number"
+        },
+        "shares": {
+          "type": "number"
+        },
+        "totalPln": {
+          "type": "number"
+        },
+        "resultPln": {
+          "type": "number"
+        },
+        "resultPercent": {
+          "type": "number"
+        },
+        "reason": {
+          "type": "string",
+          "maxLength": 256
+        },
+        "status": {
+          "type": "string",
+          "enum": ["ZYSK (TP)", "STRATA (SL)", "REBALANCE", "AUTO-PILOT"]
+        },
+        "date": {
+          "type": "string",
+          "maxLength": 64
+        }
+      },
+      "required": ["id", "userId", "portfolioId", "ticker", "type", "pricePln", "shares", "totalPln"]
+    },
+    "UserSettings": {
+      "title": "UserSettings",
+      "description": "User preferences such as theme, refresh interval, and telegram",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "theme": {
+          "type": "string",
+          "enum": ["dark", "light", "ocean", "forrest"]
+        },
+        "customBgUrl": {
+          "type": "string",
+          "maxLength": 1024
+        },
+        "refreshIntervalSec": {
+          "type": "number"
+        },
+        "bgOpacity": {
+          "type": "number"
+        },
+        "bgBlur": {
+          "type": "number"
+        },
+        "botToken": {
+          "type": "string",
+          "maxLength": 256
+        },
+        "chatId": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "alertsEnabled": {
+          "type": "boolean"
+        },
+        "updatedAt": {
+          "type": "string",
+          "maxLength": 64
+        }
+      },
+      "required": ["userId", "theme", "refreshIntervalSec"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "UserProfile",
+      "description": "User profiles and permissions"
+    },
+    "/users/{userId}/portfolios/{portfolioId}": {
+      "schema": "UserPortfolio",
+      "description": "User portfolio strategies"
+    },
+    "/users/{userId}/trades/{tradeId}": {
+      "schema": "UserTrade",
+      "description": "User trader journal entries"
+    },
+    "/users/{userId}/settings/{settingId}": {
+      "schema": "UserSettings",
+      "description": "User application settings"
+    }
+  }
+}
