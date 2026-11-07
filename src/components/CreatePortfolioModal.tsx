@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { PortfolioStrategy } from '../types/stock';
+import { PortfolioStrategy, MarketSegment } from '../types/stock';
 import { PortfolioService } from '../services/portfolioService';
 import { PlusCircle, X, CheckCircle2, AlertCircle, Layers, Zap, Send } from 'lucide-react';
 
@@ -9,6 +9,13 @@ interface CreatePortfolioModalProps {
   onPortfolioCreated: (newPortfolio: PortfolioStrategy) => void;
 }
 
+const MARKET_OPTIONS: { id: MarketSegment; label: string; sub: string; icon: string }[] = [
+  { id: 'GPW', label: 'Akcje GPW', sub: 'WIG20, mWIG40, sWIG80', icon: '📈' },
+  { id: 'Surowce', label: 'Surowce i Towary', sub: 'Złoto, Ropa, Srebro, Miedź, Gaz', icon: '🛢️' },
+  { id: 'NewConnect', label: 'NewConnect', sub: 'Spółki Wzrostowe NC', icon: '🚀' },
+  { id: 'FW20', label: 'Kontrakty FW20', sub: 'Futures & Arbitraż', icon: '⚡' },
+];
+
 export const CreatePortfolioModal: React.FC<CreatePortfolioModalProps> = ({
   isOpen,
   onClose,
@@ -17,12 +24,21 @@ export const CreatePortfolioModal: React.FC<CreatePortfolioModalProps> = ({
   const [name, setName] = useState('');
   const [shortDesc, setShortDesc] = useState('');
   const [riskLevel, setRiskLevel] = useState<'Niskie' | 'Umiarkowane' | 'Wysokie' | 'Arbitraż'>('Umiarkowane');
+  const [allowedMarkets, setAllowedMarkets] = useState<MarketSegment[]>(['GPW', 'Surowce', 'NewConnect', 'FW20']);
   const [initialCapital, setInitialCapital] = useState<number>(50000);
   const [autoPilotEnabled, setAutoPilotEnabled] = useState<boolean>(true);
   const [telegramEnabled, setTelegramEnabled] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
 
   if (!isOpen) return null;
+
+  const toggleMarket = (marketId: MarketSegment) => {
+    if (allowedMarkets.includes(marketId)) {
+      setAllowedMarkets(allowedMarkets.filter(m => m !== marketId));
+    } else {
+      setAllowedMarkets([...allowedMarkets, marketId]);
+    }
+  };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -44,7 +60,8 @@ export const CreatePortfolioModal: React.FC<CreatePortfolioModalProps> = ({
       riskLevel,
       initialCapital,
       autoPilotEnabled,
-      telegramEnabled
+      telegramEnabled,
+      allowedMarkets.length > 0 ? allowedMarkets : ['GPW', 'Surowce', 'NewConnect', 'FW20']
     );
 
     onPortfolioCreated(newPort);
@@ -53,10 +70,10 @@ export const CreatePortfolioModal: React.FC<CreatePortfolioModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4 text-slate-100">
-      <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-md p-6 shadow-2xl relative">
+      <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-lg p-6 shadow-2xl relative">
         <button
           onClick={onClose}
-          className="absolute top-4 right-4 p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800"
+          className="absolute top-4 right-4 p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 cursor-pointer"
         >
           <X className="w-5 h-5" />
         </button>
@@ -66,8 +83,8 @@ export const CreatePortfolioModal: React.FC<CreatePortfolioModalProps> = ({
             <Layers className="w-5 h-5" />
           </div>
           <div>
-            <h3 className="text-base font-bold text-white">Utwórz Nowy Portfel Strategii GPW</h3>
-            <p className="text-xs text-slate-400">Zdefiniuj kapitał początkowy w PLN, profil ryzyka i reguły egzekucji</p>
+            <h3 className="text-base font-bold text-white">Utwórz Nowy Portfel Strategii</h3>
+            <p className="text-xs text-slate-400">Zdefiniuj kapitał początkowy w PLN, profil ryzyka i rynki dla Auto-Pilota</p>
           </div>
         </div>
 
@@ -86,8 +103,8 @@ export const CreatePortfolioModal: React.FC<CreatePortfolioModalProps> = ({
               required
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder="np. Portfel Wzrostowy NewConnect 2026"
-              className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-rose-500"
+              placeholder="np. Portfel Wzrostowy Surowce & GPW 2026"
+              className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-emerald-500"
             />
           </div>
 
@@ -97,8 +114,8 @@ export const CreatePortfolioModal: React.FC<CreatePortfolioModalProps> = ({
               type="text"
               value={shortDesc}
               onChange={(e) => setShortDesc(e.target.value)}
-              placeholder="np. Agresywna alokacja w małe innowacyjne spółki z wysokim momentum"
-              className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-rose-500"
+              placeholder="np. Alokacja w surowce i spółki dywidendowe z wysokim wskaźnikiem Konsensusu"
+              className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-emerald-500"
             />
           </div>
 
@@ -108,7 +125,7 @@ export const CreatePortfolioModal: React.FC<CreatePortfolioModalProps> = ({
               <select
                 value={riskLevel}
                 onChange={(e) => setRiskLevel(e.target.value as any)}
-                className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-rose-500"
+                className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-emerald-500"
               >
                 <option value="Niskie">Niskie (Defensywne)</option>
                 <option value="Umiarkowane">Umiarkowane (Growth)</option>
@@ -126,8 +143,62 @@ export const CreatePortfolioModal: React.FC<CreatePortfolioModalProps> = ({
                 required
                 value={initialCapital}
                 onChange={(e) => setInitialCapital(parseFloat(e.target.value) || 0)}
-                className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white font-mono focus:outline-none focus:border-rose-500"
+                className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white font-mono focus:outline-none focus:border-emerald-500"
               />
+            </div>
+          </div>
+
+          {/* Market Checkboxes */}
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between">
+              <label className="block text-slate-300 font-medium">
+                Dopuszczalne Rynki dla Auto-Pilota (Checkboxy):
+              </label>
+              <div className="flex gap-2 text-[11px]">
+                <button
+                  type="button"
+                  onClick={() => setAllowedMarkets(['GPW', 'Surowce', 'NewConnect', 'FW20'])}
+                  className="text-emerald-400 hover:underline cursor-pointer font-medium"
+                >
+                  Wszystkie
+                </button>
+                <span className="text-slate-600">|</span>
+                <button
+                  type="button"
+                  onClick={() => setAllowedMarkets([])}
+                  className="text-slate-400 hover:underline cursor-pointer"
+                >
+                  Odznacz wszystkie
+                </button>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2 p-2.5 bg-slate-950/80 border border-slate-800 rounded-xl">
+              {MARKET_OPTIONS.map((opt) => {
+                const isChecked = allowedMarkets.includes(opt.id);
+                return (
+                  <label
+                    key={opt.id}
+                    onClick={() => toggleMarket(opt.id)}
+                    className={`flex items-center gap-2 p-2 rounded-lg border text-xs cursor-pointer transition-all ${
+                      isChecked
+                        ? 'bg-emerald-950/50 border-emerald-600/70 text-emerald-200 shadow-sm'
+                        : 'bg-slate-900/50 border-slate-800 text-slate-400 hover:border-slate-700'
+                    }`}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={isChecked}
+                      onChange={() => {}} // handled by parent onClick
+                      className="accent-emerald-500 w-4 h-4 rounded cursor-pointer shrink-0"
+                    />
+                    <div className="flex flex-col min-w-0">
+                      <span className="font-semibold text-[11px] truncate">{opt.icon} {opt.label}</span>
+                      <span className="text-[9px] text-slate-400 truncate">{opt.sub}</span>
+                    </div>
+                  </label>
+                );
+              })}
             </div>
           </div>
 

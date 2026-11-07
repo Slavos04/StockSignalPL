@@ -14,6 +14,8 @@ import {
 import { PortfolioStrategy, TradeRecord, StockQuote, PositionItem, HistoricalBar } from '../types/stock';
 import { PortfolioService } from '../services/portfolioService';
 import { CreatePortfolioModal } from './CreatePortfolioModal';
+import { EditPortfolioModal } from './EditPortfolioModal';
+import { Settings } from 'lucide-react';
 import {
   Layers,
   TrendingUp,
@@ -651,6 +653,7 @@ export const TabPortfolios: React.FC<TabPortfoliosProps> = ({
   const [tradeFilter, setTradeFilter] = useState<'ALL' | 'AUTO-PILOT' | 'ZYSK (TP)' | 'STRATA (SL)' | 'REBALANCE'>('ALL');
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
 
   // Sorting state for Active Positions
   const [posSortField, setPosSortField] = useState<'ticker' | 'shares' | 'entryPrice' | 'currentPrice' | 'pnlPln' | 'pnlPercent'>('pnlPln');
@@ -2142,10 +2145,57 @@ export const TabPortfolios: React.FC<TabPortfoliosProps> = ({
                 </div>
               </div>
 
-              {/* Sekcja 2: Zasady Strategii Multi-TP */}
+              {/* Sekcja 2: Zasady Strategii Multi-TP & Modyfikacja */}
               <div>
-                <h3 className="text-sm font-bold text-white mb-4">Zasady Strategii & Mechanika Portfela</h3>
-                <div className="space-y-3 text-xs text-slate-300">
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="text-sm font-bold text-white">Zasady Strategii & Rynki Portfela</h3>
+                  <button
+                    onClick={() => setIsEditModalOpen(true)}
+                    className="px-3 py-1.5 rounded-xl bg-amber-600/20 hover:bg-amber-600/30 text-amber-300 border border-amber-500/40 text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer shadow-sm"
+                    title="Modyfikuj strategię, dozwolone rynki, profil ryzyka lub wpłać dodatkowy kapitał"
+                  >
+                    <Settings className="w-3.5 h-3.5 text-amber-400" />
+                    <span>Edytuj Strategię</span>
+                  </button>
+                </div>
+
+                {/* Status Strategii Badge */}
+                <div className="mb-3 p-2.5 rounded-xl bg-slate-950/70 border border-slate-800 flex flex-wrap items-center justify-between gap-2 text-xs font-mono">
+                  <div>
+                    <span className="text-slate-400 font-sans block text-[10px]">Dopuszczalne Rynki (Auto-Pilot):</span>
+                    <span className="text-emerald-400 font-bold flex flex-wrap gap-1 mt-0.5">
+                      {(() => {
+                        const markets = currentPortfolio.allowedMarkets ||
+                          (currentPortfolio.allowedMarket && currentPortfolio.allowedMarket !== 'ALL'
+                            ? [currentPortfolio.allowedMarket as any]
+                            : ['GPW', 'Surowce', 'NewConnect', 'FW20']);
+
+                        if (markets.length === 4) {
+                          return <span className="bg-emerald-950/60 text-emerald-300 border border-emerald-800/60 px-2 py-0.5 rounded-md text-[11px]">🌐 Wszystkie Rynki</span>;
+                        }
+
+                        const icons: Record<string, string> = {
+                          GPW: '📈 GPW',
+                          Surowce: '🛢️ Surowce',
+                          NewConnect: '🚀 NewConnect',
+                          FW20: '⚡ FW20'
+                        };
+
+                        return markets.map(m => (
+                          <span key={m} className="bg-emerald-950/60 text-emerald-300 border border-emerald-800/60 px-2 py-0.5 rounded-md text-[11px]">
+                            {icons[m] || m}
+                          </span>
+                        ));
+                      })()}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-slate-400 font-sans block text-[10px]">Profil Ryzyka:</span>
+                    <span className="text-amber-300 font-bold">{currentPortfolio.riskLevel}</span>
+                  </div>
+                </div>
+
+                <div className="space-y-2.5 text-xs text-slate-300">
                   <div className="flex items-start gap-2">
                     <div className="w-5 h-5 rounded-md bg-emerald-950 text-emerald-400 border border-emerald-800/40 flex items-center justify-center shrink-0 mt-0.5 font-bold">
                       1
@@ -2156,13 +2206,13 @@ export const TabPortfolios: React.FC<TabPortfoliosProps> = ({
                     <div className="w-5 h-5 rounded-md bg-emerald-950 text-emerald-400 border border-emerald-800/40 flex items-center justify-center shrink-0 mt-0.5 font-bold">
                       2
                     </div>
-                    <p><b>Auto-Pilot GPW:</b> Konsensus live &gt;= 76% z 10 źródeł automatycznie otwiera pozycję o stałym ryzyku, jeśli Auto-Pilot jest włączony na danym portfelu.</p>
+                    <p><b>Ograniczenie Rynkowe:</b> Auto-Pilot kupuje wyłącznie w wybranym segmencie rynku dla tego portfela.</p>
                   </div>
                   <div className="flex items-start gap-2">
                     <div className="w-5 h-5 rounded-md bg-emerald-950 text-emerald-400 border border-emerald-800/40 flex items-center justify-center shrink-0 mt-0.5 font-bold">
                       3
                     </div>
-                    <p><b>Alerty Telegram:</b> Możliwość niezależnego włączania powiadomień Telegram na poziomie każdego portfela.</p>
+                    <p><b>Alerty Telegram:</b> Niezależne włączanie powiadomień na poziomie każdego portfela.</p>
                   </div>
                 </div>
               </div>
@@ -2342,6 +2392,18 @@ export const TabPortfolios: React.FC<TabPortfoliosProps> = ({
         isOpen={isCreateModalOpen}
         onClose={() => setIsCreateModalOpen(false)}
         onPortfolioCreated={handlePortfolioCreated}
+      />
+
+      {/* Modal to Edit Portfolio Strategy & Allowed Markets */}
+      <EditPortfolioModal
+        portfolio={currentPortfolio}
+        isOpen={isEditModalOpen}
+        onClose={() => setIsEditModalOpen(false)}
+        onPortfolioUpdated={(updated) => {
+          onPortfoliosUpdate([...PortfolioService.getPortfolios()]);
+          setToastMessage(`Pomyślnie zaktualizowano strategię portfela "${updated.name}"`);
+          setTimeout(() => setToastMessage(null), 4000);
+        }}
       />
     </div>
   );

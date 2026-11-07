@@ -1,4 +1,4 @@
-import { PortfolioStrategy, TradeRecord, PositionItem, StockQuote, AutoPilotNotification } from '../types/stock';
+import { PortfolioStrategy, TradeRecord, PositionItem, StockQuote, AutoPilotNotification, MarketSegment, AllowedMarketFilter, StockMarket } from '../types/stock';
 import { INITIAL_PORTFOLIOS, INITIAL_TRADES } from '../data/initialData';
 import { AudioService } from './audioService';
 import { MarketSessionService } from './marketSessionService';
@@ -138,13 +138,35 @@ export class PortfolioService {
   }
 
 
+  public static isStockMarketAllowed(portfolio: PortfolioStrategy, stockMarket: StockMarket): boolean {
+    let stockSegment: MarketSegment = 'GPW';
+    if (stockMarket === 'Surowce') stockSegment = 'Surowce';
+    else if (stockMarket === 'NewConnect') stockSegment = 'NewConnect';
+    else if (stockMarket === 'FW20') stockSegment = 'FW20';
+    else stockSegment = 'GPW';
+
+    if (portfolio.allowedMarkets && portfolio.allowedMarkets.length > 0) {
+      return portfolio.allowedMarkets.includes(stockSegment);
+    }
+
+    if (portfolio.allowedMarket && portfolio.allowedMarket !== 'ALL') {
+      if (portfolio.allowedMarket === 'Surowce') return stockMarket === 'Surowce';
+      if (portfolio.allowedMarket === 'GPW') return (stockMarket !== 'Surowce' && stockMarket !== 'NewConnect' && stockMarket !== 'FW20');
+      if (portfolio.allowedMarket === 'NewConnect') return stockMarket === 'NewConnect';
+      if (portfolio.allowedMarket === 'FW20') return stockMarket === 'FW20';
+    }
+
+    return true;
+  }
+
   public static createPortfolio(
     name: string,
     shortDesc: string,
     riskLevel: 'Niskie' | 'Umiarkowane' | 'Wysokie' | 'Arbitraż',
     initialCapital: number,
     autoPilotEnabled: boolean = true,
-    telegramEnabled: boolean = true
+    telegramEnabled: boolean = true,
+    allowedMarkets: MarketSegment[] = ['GPW', 'Surowce', 'NewConnect', 'FW20']
   ): PortfolioStrategy {
     this.getPortfolios();
     const id = `port_${Date.now()}`;
@@ -153,6 +175,8 @@ export class PortfolioService {
       name,
       shortDesc: shortDesc || `Portfel inwestycyjny GPW o profilu ryzyka: ${riskLevel}`,
       riskLevel,
+      allowedMarkets,
+      allowedMarket: allowedMarkets.length === 4 ? 'ALL' : (allowedMarkets[0] as any || 'ALL'),
       initialCapital,
       currentBalance: initialCapital,
       allocatedPln: 0,
@@ -174,6 +198,44 @@ export class PortfolioService {
     this.portfolios.push(newPort);
     this.savePortfolios();
     return newPort;
+  }
+
+  public static updatePortfolioStrategy(
+    portfolioId: string,
+    updates: {
+      name?: string;
+      shortDesc?: string;
+      riskLevel?: 'Niskie' | 'Umiarkowane' | 'Wysokie' | 'Arbitraż';
+      allowedMarkets?: MarketSegment[];
+      allowedMarket?: AllowedMarketFilter;
+      autoPilotEnabled?: boolean;
+      telegramEnabled?: boolean;
+      addCashPln?: number;
+    }
+  ): { success: boolean; message: string; portfolio?: PortfolioStrategy } {
+    const portfolio = this.getPortfolio(portfolioId);
+    if (!portfolio) return { success: false, message: 'Nie znaleziono portfela do edycji.' };
+
+    if (updates.name !== undefined) portfolio.name = updates.name.trim();
+    if (updates.shortDesc !== undefined) portfolio.shortDesc = updates.shortDesc.trim();
+    if (updates.riskLevel !== undefined) portfolio.riskLevel = updates.riskLevel;
+    if (updates.allowedMarkets !== undefined) portfolio.allowedMarkets = updates.allowedMarkets;
+    if (updates.allowedMarket !== undefined) portfolio.allowedMarket = updates.allowedMarket;
+    if (updates.autoPilotEnabled !== undefined) portfolio.autoPilotEnabled = updates.autoPilotEnabled;
+    if (updates.telegramEnabled !== undefined) portfolio.telegramEnabled = updates.telegramEnabled;
+
+    if (updates.addCashPln && updates.addCashPln > 0) {
+      portfolio.cashPln += updates.addCashPln;
+      portfolio.initialCapital += updates.addCashPln;
+      portfolio.currentBalance += updates.addCashPln;
+    }
+
+    this.savePortfolios();
+    return {
+      success: true,
+      message: `Strategia portfela "${portfolio.name}" została pomyślnie zaktualizowana!`,
+      portfolio
+    };
   }
 
   public static deletePortfolio(id: string): { success: boolean; message: string } {
@@ -749,6 +811,9 @@ export class PortfolioService {
       if (!isStrongBuy) return;
 
       activePortfolios.forEach(portfolio => {
+        // Weryfikacja ograniczeń rynkowych w strategii tego portfela (checkboxy rynków)
+        if (!this.isStockMarketAllowed(portfolio, stock.market)) return;
+
         // Sprawdź czy portfel nie posiada już aktywnej pozycji w tym walorze
         const alreadyHolds = portfolio.activePositions.some(
           pos => pos.ticker.toLowerCase() === stock.symbol.toLowerCase() ||

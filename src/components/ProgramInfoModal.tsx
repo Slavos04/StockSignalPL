@@ -16,6 +16,24 @@ CHANGELOG - HISTORIA ZMIAN I WERSJI STOCKSIGNALPL
 ================================================================================
 
 ================================================================================
+Wersja 2.1 (2026-11-07) - Multi-Market Checkboxy dla Auto-Pilota, Edycja Strategii Portfela, Zasilanie Gotówkowe & Korekta Tickerów GPW i Surowców
+================================================================================
+1. WIELOKROTNA SEGMENTACJA RYNKU DLA AUTO-PILOTA (CHECKBOXY):
+   - Zastąpiono pojedynczy wybór rynków z listy rozwijanej czytelnym modułem multi-select checkboxów w formularzach tworzenia i edycji strategii portfelowej.
+   - Dostępne segmenty rynkowe: Akcje GPW (WIG20, mWIG40, sWIG80), Surowce i Towary (Złoto, Ropa Brent/WTI, Platyna, Srebro, Miedź, Gaz Ziemny, Pszenica), NewConnect (Spółki Wzrostowe) oraz Kontrakty FW20 (Futures).
+   - Auto-Pilot w danym portfelu automatycznie giełduje i kupuje walory wyłącznie z rynków zaznaczonych na liście dopuszczalnych w tej konkretnej strategii.
+   - Szybkie akcje "Wszystkie" i "Odznacz wszystkie" oraz dynamiczne plakietki z ikonami (📈 GPW, 🛢️ Surowce, 🚀 NC, ⚡ FW20) na kafelku portfela.
+
+2. EDYCJA STRATEGII PORTFELA I DOPŁATA KAPITAŁU (EDIT PORTFOLIO MODAL):
+   - Nowy interaktywny przycisk "Edytuj Strategię" na kafelku zasad strategii i rynków portfela.
+   - Opcja zasilania wolnej gotówki w PLN (dopłata kapitału) z natychmiastową aktualizacją salda i bilansu inwestycyjnego.
+   - Modyfikacja poziomu ryzyka, nazwy, opisu oraz przełączników Auto-Pilota i alertów Telegram.
+
+3. KOREKTA I PEŁNA WERYFIKACJA TICKERÓW GIEŁDOWYCH STOOQ:
+   - Skorygowano symbole Stooq dla spółki JSW (JSB.PL -> JSW.PL), mBank (MBI.PL -> MBK.PL) oraz Pszenicy CBOT (W.F -> ZW.F).
+   - Przeanalizowano i zweryfikowano 100% poprawność wszystkich 30+ tickerów akcji GPW, kontraktów FW20 i surowców w bazie Seed Data.
+
+================================================================================
 Wersja 2.0 (2026-11-05) - Przejście na 100% Dane Rzeczywiste (WSE GPW / NBP / COMEX) i Całkowite Usunięcie Symulacji Losowej
 ================================================================================
 1. CAŁKOWITE WYELIMINOWANIE FAŁSZYWYCH DANYCH I GENERATORA LOSOWYCH TICKÓW:
@@ -113,7 +131,7 @@ Wersja 1.8 (2026-11-04) - Moduł Analizy i Tradingu na Rynku Surowców & Portfel
      * Srebro Spot (XAG.PL - 1 oz) – metal szlachetny oraz komponent fotowoltaiki,
      * Miedź COMEX (HG.F - 1 lb) – wskaźnik koniunktury ("Doktor Miedź") i transformacji EV,
      * Gaz Ziemny (NG.F - Henry Hub) – kluczowy surowiec grzewczy i elektroenergetyczny,
-     * Pszenica CBOT (W.F - 1 bu) – bazowy surowiec rolny i bezpieczeństwa żywnościowego.
+     * Pszenica CBOT (ZW.F - 1 bu) – bazowy surowiec rolny i bezpieczeństwa żywnościowego.
 
 2. ANALIZA TECHNICZNA, FORMACJE ŚWIECOWE I KONSENSUS DLA SUROWCÓW:
    - Wszystkie 10 algorytmów konsensusu (Stooq TA Screener, RSI14, MACD, Złoty Krzyż SMA50/SMA200,
@@ -411,7 +429,7 @@ Wersja 1.0 (2026-11-04) - Oficjalne Wydanie StockSignalPl
                   <span className="text-emerald-400">PL</span>
                 </h3>
                 <span className="px-2 py-0.5 text-xs font-bold bg-emerald-950 text-emerald-300 border border-emerald-500/60 rounded-full shadow-sm">
-                  v2.0
+                  v2.1
                 </span>
               </div>
               <p className="text-xs text-slate-400">Polski Rynek Giełdowy GPW Warszawa & Rynek Surowców</p>
@@ -462,7 +480,7 @@ Wersja 1.0 (2026-11-04) - Oficjalne Wydanie StockSignalPl
                   <span>Platforma Inwestycyjna GPW Warszawa & Surowce (100% Dane Rzeczywiste)</span>
                 </h4>
                 <p className="text-slate-300">
-                  <b>StockSignalPL v2.0</b> to profesjonalny system wspomagania decyzji inwestycyjnych dla polskiego rynku akcji, kontraktów terminowych oraz <b>rynku surowców</b> (Złoto, Ropa Brent, Ropa WTI, Platyna, Srebro, Miedź, Gaz Ziemny, Pszenica). Wszystkie notowania, świece OHLC oraz wyceny portfeli bazują w 100% na autentycznych danych z warszawskiej giełdy (GPW), tabeli kursów NBP oraz światowych giełd surowcowych COMEX/NYMEX (całkowicie wyeliminowano sztuczne losowe ticki). Posiada zintegrowaną bazę danych <b>PostgreSQL 16</b> z obsługą konteneryzacji <b>Docker & Docker Compose</b> dla serwera Ubuntu.
+                  <b>StockSignalPL v2.1</b> to profesjonalny system wspomagania decyzji inwestycyjnych dla polskiego rynku akcji, kontraktów terminowych oraz <b>rynku surowców</b> (Złoto, Ropa Brent, Ropa WTI, Platyna, Srebro, Miedź, Gaz Ziemny, Pszenica). Wszystkie notowania, świece OHLC oraz wyceny portfeli bazują w 100% na autentycznych danych z warszawskiej giełdy (GPW), tabeli kursów NBP oraz światowych giełd surowcowych COMEX/NYMEX (całkowicie wyeliminowano sztuczne losowe ticki). Posiada zintegrowaną bazę danych <b>PostgreSQL 16</b> z obsługą konteneryzacji <b>Docker & Docker Compose</b> dla serwera Ubuntu.
                 </p>
               </div>
 

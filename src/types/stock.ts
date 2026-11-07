@@ -1,6 +1,6 @@
 /**
- * Typy danych dla platformy StockSignalPl v1.0
- * Rynek Giełdowy GPW Warszawa
+ * Typy danych dla platformy StockSignalPl v2.1
+ * Rynek Giełdowy GPW Warszawa & Surowce
  */
 
 export type StockMarket = 'WIG20' | 'mWIG40' | 'sWIG80' | 'NewConnect' | 'FW20' | 'Surowce';
@@ -138,11 +138,16 @@ export interface PositionItem {
   entryDate: string;
 }
 
+export type AllowedMarketFilter = 'ALL' | 'GPW' | 'Surowce' | 'NewConnect' | 'FW20';
+export type MarketSegment = 'GPW' | 'Surowce' | 'NewConnect' | 'FW20';
+
 export interface PortfolioStrategy {
   id: string;
   name: string;
   shortDesc: string;
   riskLevel: 'Niskie' | 'Umiarkowane' | 'Wysokie' | 'Arbitraż';
+  allowedMarkets?: MarketSegment[]; // Ograniczenie Auto-Pilota do wybranych rynków (checkboxy)
+  allowedMarket?: AllowedMarketFilter; // Dla kompatybilności wstecznej
   initialCapital: number;
   currentBalance: number;
   allocatedPln: number;
