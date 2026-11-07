@@ -1,6 +1,6 @@
 {
   "name": "StockSignalPl",
-  "description": "Profesjonalna platforma sygnałów i analizy polskiego rynku giełdowego GPW oraz rynku surowców (Złoto, Ropa, Platyna, Pszenica, Miedź, Gaz). Wersja 1.8. Baza PostgreSQL i konteneryzacja Docker. Kontakt: slavosmm@gmail.com.",
+  "description": "Profesjonalna platforma sygnałów i analizy polskiego rynku giełdowego GPW oraz rynku surowców (Złoto, Ropa, Platyna, Pszenica, Miedź, Gaz). Wersja 2.0. Baza PostgreSQL, automatyzacja sesji rynkowych, audio chime i konteneryzacja Docker. Kontakt: slavosmm@gmail.com.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

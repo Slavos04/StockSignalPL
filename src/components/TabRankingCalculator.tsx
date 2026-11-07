@@ -168,6 +168,9 @@ export const TabRankingCalculator: React.FC<TabRankingCalculatorProps> = ({
       onPortfoliosUpdate([...PortfolioService.getPortfolios()]);
       confetti({ particleCount: 50, spread: 60, origin: { y: 0.7 } });
       setTimeout(() => setToastMessage(null), 4000);
+    } else {
+      setToastMessage(res.message);
+      setTimeout(() => setToastMessage(null), 6000);
     }
   };
 

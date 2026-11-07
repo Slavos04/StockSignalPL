@@ -1,6 +1,8 @@
 import { PortfolioStrategy, TradeRecord, PositionItem, StockQuote, AutoPilotNotification } from '../types/stock';
 import { INITIAL_PORTFOLIOS, INITIAL_TRADES } from '../data/initialData';
 import { AudioService } from './audioService';
+import { MarketSessionService } from './marketSessionService';
+import { SettingsService } from './settingsService';
 
 const PORTFOLIOS_STORAGE_KEY = 'stocksignalpl_portfolios_v1';
 const TRADES_STORAGE_KEY = 'stocksignalpl_trades_v1';
@@ -28,7 +30,10 @@ export class PortfolioService {
     const savedT = localStorage.getItem(TRADES_STORAGE_KEY);
     if (savedT) {
       try {
-        this.trades = JSON.parse(savedT);
+        const parsed: TradeRecord[] = JSON.parse(savedT);
+        // Odfiltruj transakcje błędnie wygenerowane w sobotę 07.11.2026 przed wdrożeniem blokady rynkowej
+        this.trades = parsed.filter(t => !(t.date && (t.date.includes('7.11.2026') || t.date.includes('07.11.2026') || t.date.includes('2026-11-07'))));
+        this.saveTrades();
       } catch {
         this.trades = [...INITIAL_TRADES];
       }
@@ -99,7 +104,7 @@ export class PortfolioService {
       if (res.ok) {
         const data = await res.json();
         if (data.success && Array.isArray(data.trades)) {
-          this.trades = data.trades;
+          this.trades = data.trades.filter((t: TradeRecord) => !(t.date && (t.date.includes('7.11.2026') || t.date.includes('07.11.2026') || t.date.includes('2026-11-07'))));
           this.saveTrades();
           return this.trades;
         }
@@ -258,6 +263,18 @@ export class PortfolioService {
     if (posIndex === -1) return { success: false, message: 'Nie znaleziono pozycji do zamknięcia', pnlPln: 0 };
 
     const pos = portfolio.activePositions[posIndex];
+
+    // Weryfikacja czy rynek dla waloru jest obecnie otwarty
+    const forceTest = SettingsService.getSettings().forceSessionOpenTest;
+    const marketCheck = MarketSessionService.isMarketOpenForStock(pos.ticker, new Date(), forceTest);
+    if (!marketCheck.isOpen) {
+      return {
+        success: false,
+        message: `Nie można zamknąć pozycji. Rynek dla ${pos.ticker} jest ZAMKNIĘTY (${marketCheck.marketName}). ${marketCheck.reason}`,
+        pnlPln: 0
+      };
+    }
+
     const closePrice = pos.currentPrice;
     const totalReturnPln = Number((pos.shares * closePrice).toFixed(2));
     const pnlPln = Number(((closePrice - pos.entryPrice) * pos.shares).toFixed(2));
@@ -313,6 +330,16 @@ export class PortfolioService {
     targetPortfolioId?: string,
     customShares?: number
   ): { success: boolean; message: string; position?: PositionItem; portfolioName?: string } {
+    // Weryfikacja czy rynek dla waloru jest obecnie otwarty
+    const forceTest = SettingsService.getSettings().forceSessionOpenTest;
+    const marketCheck = MarketSessionService.isMarketOpenForStock(stock, new Date(), forceTest);
+    if (!marketCheck.isOpen) {
+      return {
+        success: false,
+        message: `Zlecenie odrzucone. Rynek dla waloru ${stock.symbol} jest ZAMKNIĘTY (${marketCheck.marketName}). ${marketCheck.reason}`
+      };
+    }
+
     let portfolio: PortfolioStrategy | undefined;
     if (targetPortfolioId) {
       portfolio = this.getPortfolio(targetPortfolioId);
@@ -423,6 +450,16 @@ export class PortfolioService {
     tp2: number,
     tp3: number
   ): { success: boolean; message: string } {
+    // Weryfikacja czy rynek dla waloru jest obecnie otwarty
+    const forceTest = SettingsService.getSettings().forceSessionOpenTest;
+    const marketCheck = MarketSessionService.isMarketOpenForStock(stock, new Date(), forceTest);
+    if (!marketCheck.isOpen) {
+      return {
+        success: false,
+        message: `Dodanie pozycji odrzucone. Rynek dla ${stock.symbol} jest ZAMKNIĘTY (${marketCheck.marketName}). ${marketCheck.reason}`
+      };
+    }
+
     const portfolio = this.getPortfolio(portfolioId) || this.getPortfolios()[0];
     if (!portfolio) return { success: false, message: 'Nie znaleziono portfela' };
 
@@ -487,6 +524,7 @@ export class PortfolioService {
     onNotification?: (notif: AutoPilotNotification) => void
   ): void {
     let changed = false;
+    const forceTest = SettingsService.getSettings().forceSessionOpenTest;
 
     this.portfolios.forEach(p => {
       const remainingPositions: PositionItem[] = [];
@@ -494,11 +532,18 @@ export class PortfolioService {
       p.activePositions.forEach(pos => {
         const quote = stockQuotes.find(q => q.symbol === pos.ticker || q.cleanSymbol === pos.ticker);
         if (quote) {
+          // Na zamkniętym rynku brak realizacji automatycznych zleceń TP/SL
+          const marketCheck = MarketSessionService.isMarketOpenForStock(quote, new Date(), forceTest);
+          if (!marketCheck.isOpen) {
+            remainingPositions.push(pos);
+            return;
+          }
+
           pos.currentPrice = quote.price;
           pos.pnlPln = Number(((pos.currentPrice - pos.entryPrice) * pos.shares).toFixed(2));
           pos.pnlPercent = Number((((pos.currentPrice - pos.entryPrice) / pos.entryPrice) * 100).toFixed(2));
 
-          const timestamp = new Date().toLocaleTimeString('pl-PL', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+          const timestamp = new Date().toLocaleString('pl-PL', { dateStyle: 'short', timeStyle: 'medium' });
 
           // 1. Osiągnięcie TP1 (33% wolumenu) -> Realizacja częściowa 33% i przesunięcie SL na Break-Even
           if (!pos.tp1Reached && pos.currentPrice >= pos.targetPrice1) {
@@ -689,7 +734,13 @@ export class PortfolioService {
     const activePortfolios = this.getPortfolios().filter(p => p.autoPilotEnabled);
     if (activePortfolios.length === 0) return;
 
+    const forceTest = SettingsService.getSettings().forceSessionOpenTest;
+
     stockQuotes.forEach(stock => {
+      // Weryfikacja czy rynek dla danego waloru jest otwarty
+      const marketCheck = MarketSessionService.isMarketOpenForStock(stock, new Date(), forceTest);
+      if (!marketCheck.isOpen) return;
+
       // Przyjmij kryterium MOCNE KUPUJ: rsi14 < 68, dodatnia zmiana lub wygenerowany sygnał wzrostowy
       const isStrongBuy = (stock.trendScore && stock.trendScore >= 76) ||
                           (stock.analystRecommendation?.includes('KUPUJ') && stock.changePercent > 0.3) ||
@@ -713,7 +764,7 @@ export class PortfolioService {
         const result = this.executeAutoPilotSignal(stock, stock.trendScore || 82, stock.price, portfolio.id);
         if (result.success && result.position) {
           AudioService.playBuyChime();
-          const timestamp = new Date().toLocaleTimeString('pl-PL', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+          const timestamp = new Date().toLocaleString('pl-PL', { dateStyle: 'short', timeStyle: 'medium' });
           if (onNotification) {
             onNotification({
               id: `notif_buy_${Date.now()}`,

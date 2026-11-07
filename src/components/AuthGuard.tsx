@@ -102,7 +102,7 @@ export const AuthGuard: React.FC<AuthGuardProps> = ({ currentUser, onLoginSucces
               <span className="text-yellow-400">Signal</span>
               <span className="text-emerald-400 font-extrabold">PL</span>
             </h1>
-            <span className="px-2 py-0.5 text-xs font-bold bg-emerald-950 text-emerald-300 border border-emerald-800 rounded">v1.7</span>
+            <span className="px-2 py-0.5 text-xs font-bold bg-emerald-950 text-emerald-300 border border-emerald-800 rounded">v2.0</span>
           </div>
           <p className="text-xs text-slate-400 mt-1">Giełda Papierów Wartościowych w Warszawie (GPW)</p>
         </div>
@@ -253,7 +253,7 @@ export const AuthGuard: React.FC<AuthGuardProps> = ({ currentUser, onLoginSucces
       </div>
 
       <footer className="mt-8 text-center text-xs text-slate-500 z-10 space-y-1">
-        <p>StockSignalPL v1.5 • Polski Rynek Giełdowy GPW • Kontakt: slavosmm@gmail.com</p>
+        <p>StockSignalPL v2.0 • Polski Rynek Giełdowy GPW • Kontakt: slavosmm@gmail.com</p>
       </footer>
     </div>
   );

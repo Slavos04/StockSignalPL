@@ -255,4 +255,110 @@ export class MarketSessionService {
       isWeekend: false
     };
   }
+
+  /**
+   * Sprawdza czy rynek dla danego waloru (GPW lub Surowce) jest obecnie otwarty do zawierania transakcji.
+   */
+  public static isMarketOpenForStock(
+    stockOrSymbol: { market?: string; category?: string; symbol?: string; cleanSymbol?: string } | string,
+    refDate: Date = new Date(),
+    forceSessionOpenTest: boolean = false
+  ): { isOpen: boolean; marketName: string; reason: string } {
+    if (forceSessionOpenTest) {
+      return {
+        isOpen: true,
+        marketName: 'Tryb Testowy',
+        reason: 'Wymuszono tryb otwartej sesji dla celów testowych w ustawieniach aplikacji.'
+      };
+    }
+
+    let isCommodity = false;
+    let symbolClean = '';
+
+    if (typeof stockOrSymbol === 'string') {
+      symbolClean = stockOrSymbol.toUpperCase();
+    } else if (stockOrSymbol) {
+      const m = (stockOrSymbol.market || '').toUpperCase();
+      const c = (stockOrSymbol.category || '').toUpperCase();
+      const s = (stockOrSymbol.cleanSymbol || stockOrSymbol.symbol || '').toUpperCase();
+      symbolClean = s;
+      if (m === 'SUROWCE' || c === 'SUROWCE') {
+        isCommodity = true;
+      }
+    }
+
+    const commodityTickers = ['XAU', 'XAG', 'XPT', 'BRENT', 'WTI', 'COPPER', 'GAS', 'WHEAT', 'CORN'];
+    if (commodityTickers.some(t => symbolClean.includes(t))) {
+      isCommodity = true;
+    }
+
+    const warsaw = getWarsawDate(refDate);
+    const dayOfWeek = warsaw.getDay(); // 0 = Niedziela, 6 = Sobota
+    const hours = warsaw.getHours();
+    const minutes = warsaw.getMinutes();
+    const totalMinutes = hours * 60 + minutes;
+
+    if (isCommodity) {
+      // Rynek Surowców (Global Futures 24/5):
+      // Otwarty od Niedzieli 23:00 CET do Piątku 23:00 CET.
+      // Zamknięty: Sobota, Niedziela do 23:00 CET, Piątek po 23:00 CET, Przerwa 23:00-00:00.
+
+      if (dayOfWeek === 6) { // Sobota
+        return {
+          isOpen: false,
+          marketName: 'Surowce Globalne (24/5)',
+          reason: 'Rynek surowcowy jest zamknięty w weekend (sobota). Ponowne otwarcie handlu w niedzielę o 23:00.'
+        };
+      }
+
+      if (dayOfWeek === 0 && totalMinutes < 23 * 60) { // Niedziela do 23:00
+        const minsLeft = 23 * 60 - totalMinutes;
+        const h = Math.floor(minsLeft / 60);
+        const m = minsLeft % 60;
+        return {
+          isOpen: false,
+          marketName: 'Surowce Globalne (24/5)',
+          reason: `Rynek surowcowy otworzy się w niedzielę o 23:00 (za ${h}g ${m}m).`
+        };
+      }
+
+      if (dayOfWeek === 5 && totalMinutes >= 23 * 60) { // Piątek po 23:00
+        return {
+          isOpen: false,
+          marketName: 'Surowce Globalne (24/5)',
+          reason: 'Rynek surowcowy został zamknięty w piątek o 23:00. Otwarcie w niedzielę o 23:00.'
+        };
+      }
+
+      if (totalMinutes >= 23 * 60) { // Przerwa techniczna 23:00 - 00:00
+        return {
+          isOpen: false,
+          marketName: 'Surowce Globalne (24/5)',
+          reason: 'Przerwa rozliczeniowo-techniczna giełd surowcowych (23:00 - 00:00).'
+        };
+      }
+
+      return {
+        isOpen: true,
+        marketName: 'Surowce Globalne (24/5)',
+        reason: 'Rynek surowców jest aktywny. Notowania i transakcje ciągłe 24/5.'
+      };
+    }
+
+    // Giełda Papierów Wartościowych w Warszawie (GPW)
+    const gpwStatus = this.getGpwStatus(refDate);
+    if (!gpwStatus.isOpen) {
+      return {
+        isOpen: false,
+        marketName: 'GPW Warszawa',
+        reason: `Giełda GPW jest obecnie zamknięta (${gpwStatus.statusLabel}). Notowania ciągłe i transakcje odbywają się w dni robocze od 09:00 do 17:00.`
+      };
+    }
+
+    return {
+      isOpen: true,
+      marketName: 'GPW Warszawa',
+      reason: 'Sesja GPW otwarta (notowania i transakcje ciągłe).'
+    };
+  }
 }

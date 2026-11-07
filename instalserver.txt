@@ -1,5 +1,5 @@
 ================================================================================
-INSTRUKCJA INSTALACJI I WDROŻENIA SERWERA - STOCKSIGNALPL v2.1
+INSTRUKCJA INSTALACJI I WDROŻENIA SERWERA - STOCKSIGNALPL v2.0.0 (Wersja Stable)
 Baza Danych: PostgreSQL 16 (Lokalny Serwer Ubuntu / Docker & Docker Compose)
 Harmonogram Feedów: Automatyczny pobór 24/7 (09:00 & 18:30 GPW)
 Kontakt: slavosmm@gmail.com

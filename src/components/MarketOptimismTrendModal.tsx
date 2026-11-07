@@ -64,8 +64,17 @@ const OptimismTooltip = ({ active, payload }: any) => {
   if (!active || !payload || !payload.length) return null;
   const data: OptimismPoint = payload[0].payload;
 
+  const wig20Num = parseFloat((data.wig20 || '').replace(/[^0-9.]/g, '')) || 0;
+
+  // Układanie wskaźników według wielkości wartości w danym punkcie (najwyższa wartość na samej górze)
+  const sortedItems = [
+    { name: 'Optymizm rynku', value: `${data.optimism}%`, valNum: data.optimism, color: 'text-emerald-400' },
+    { name: 'Indeks WIG20', value: data.wig20, valNum: wig20Num, color: 'text-white' },
+    { name: 'Indeks Strachu (WIG-VIX)', value: `${data.wigVix} pkt`, valNum: data.wigVix, color: 'text-amber-400' }
+  ].sort((a, b) => b.valNum - a.valNum);
+
   return (
-    <div className="bg-slate-900/95 border border-slate-700 rounded-xl p-3.5 shadow-2xl backdrop-blur-md text-xs font-mono min-w-[220px] z-50">
+    <div className="bg-slate-900/95 border border-slate-700 rounded-xl p-3.5 shadow-2xl backdrop-blur-md text-xs font-mono min-w-[230px] z-50">
       <div className="flex items-center justify-between pb-2 mb-2 border-b border-slate-800 text-[11px] font-sans">
         <span className="text-white font-bold">{data.date}</span>
         <span className="text-emerald-400 font-bold px-2 py-0.5 rounded-full bg-emerald-950/80 border border-emerald-800/50">
@@ -74,18 +83,12 @@ const OptimismTooltip = ({ active, payload }: any) => {
       </div>
 
       <div className="space-y-1.5">
-        <div className="flex items-center justify-between">
-          <span className="text-slate-400 font-sans">Optymizm rynku:</span>
-          <span className="font-bold text-emerald-400 text-sm">{data.optimism}%</span>
-        </div>
-        <div className="flex items-center justify-between">
-          <span className="text-slate-400 font-sans">Indeks WIG20:</span>
-          <span className="font-bold text-white">{data.wig20}</span>
-        </div>
-        <div className="flex items-center justify-between">
-          <span className="text-slate-400 font-sans">Indeks Strachu (WIG-VIX):</span>
-          <span className="font-bold text-amber-400">{data.wigVix} pkt</span>
-        </div>
+        {sortedItems.map((item, idx) => (
+          <div key={idx} className="flex items-center justify-between gap-4">
+            <span className="text-slate-400 font-sans">{item.name}:</span>
+            <span className={`font-bold ${item.color}`}>{item.value}</span>
+          </div>
+        ))}
         {data.change && (
           <div className="flex items-center justify-between pt-1 border-t border-slate-800/80">
             <span className="text-slate-400 font-sans">Zmiana sesyjna:</span>

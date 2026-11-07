@@ -38,6 +38,29 @@ Wersja 2.0 (2026-11-05) - Przejście na 100% Dane Rzeczywiste (WSE GPW / NBP / C
    - Nowy znacznik „100% Dane Rzeczywiste (GPW / NBP)” na górnej belce aplikacji potwierdzający brak symulacji.
 
 ================================================================================
+Wersja 2.0 (2026-11-07) - Pełna Automatyzacja Auto-Pilota z Zabezpieczeniem Sesji Rynkowych 24/7, Sygnały Dźwiękowe & Dymki Toast ze Znacznikiem Czasu
+================================================================================
+1. BEZWZGLĘDNA WERYFIKACJA GODZIN SESJI RYNKOWYCH (GPW 09:00-17:00 & SUROWCE 24/5):
+   - Wdrożono silnik weryfikacji dostępności rynków w MarketSessionService.isMarketOpenForStock.
+   - Pętla Auto-Pilota oraz zlecenia kupna/sprzedaży są wstrzymywane na zamkniętych rynkach (po 17:00, przed 09:00, w weekendy oraz polskie święta giełdowe).
+   - Handel surowcowy działa w systemie 24/5 (od niedzieli 23:00 do piątku 23:00) i jest wstrzymywany w soboty i niedziele przed otwarciem.
+   - Wyeliminowano błędne generowanie wpisów transakcyjnych w dni wolne oraz oczyszczono Dziennik Tradera z nieprawidłowych wpisów weekendowych.
+
+2. POWIADOMIENIA DŹWIĘKOWE WEB AUDIO API & WYSKAKUJĄCE KARTY TOAST:
+   - Dedykowany syntezator dźwięków w AudioService (playBuyChime, playTpChime, playSlChime) generujący syntezowane akordy audio przy transakcjach KUPNO, TP oraz SL.
+   - Wyskakujące floating karty Toast z pełną datą i godziną (DD.MM.YYYY, HH:MM:SS), nazwą portfela, kursem, wolumenem oraz PnL z opcją auto-dismiss (6 sek.).
+
+3. INTERAKTYWNY TICKER NOTOWAŃ Z NAWIGACJĄ DO KONSENSUSU:
+   - Efekt Hover: najechanie myszką na scrollowany pasek notowań GPW i Surowce natychmiast zatrzymuje przewijanie.
+   - Po kliknięciu dowolnego kafelka waloru następuje natychmiastowe przełączenie widoku na Etap 2: Live Konsensus z załadowaniem pełnej analizy wybranego instrumentu.
+
+4. DYNAMICZNIE SORTOWANE TOOLTIPY NA WSZYSTKICH WYKRESACH RECHARTS:
+   - Wszystkie dymki informacyjne (AllPortfoliosTooltip, CustomTooltip, OptimismTooltip) sortują pozycje w legendzie według ich wartości w danym punkcie w czasie (najwyższa wartość na samej górze).
+
+5. ZAPIS POWIADOMIEŃ W TLE I GOTOWOŚĆ DO EXPORTU NA GITHUB:
+   - Zaktualizowano dokumentację instalacji w instalserver.txt, pakiet package.json (v2.0.0) oraz metadata.json.
+
+================================================================================
 Wersja 1.9 (2026-11-05) - Zbiorczy Wykres Portfeli (PLN i %), Ręczne Zamykanie Pozycji, Ticker GPW i Surowce ($/zł) oraz Interaktywne Tooltipy Sentymentu
 ================================================================================
 1. ZBIORCZY WIDOK „WSZYSTKIE PORTFELE” I WIELOLINIOWY WYKRES PORÓWNAWCZY (W ZŁ I %):

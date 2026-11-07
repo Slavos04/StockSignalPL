@@ -3,6 +3,7 @@ import { StockQuote, StockConsensus, PortfolioStrategy, TradeRecord, StockMarket
 import { StooqService } from '../services/stooqService';
 import { PortfolioService } from '../services/portfolioService';
 import { TelegramService } from '../services/telegramService';
+import { MarketSessionService } from '../services/marketSessionService';
 import { CandlestickRecharts } from './CandlestickRecharts';
 import { AddNewStockModal } from './AddNewStockModal';
 import {
@@ -113,6 +114,11 @@ export const TabConsensus: React.FC<TabConsensusProps> = ({
   const consensus = useMemo(() => {
     if (!currentStock) return null;
     return StooqService.calculateConsensus(currentStock);
+  }, [currentStock]);
+
+  const marketStatus = useMemo(() => {
+    if (!currentStock) return { isOpen: true, marketName: '', reason: '' };
+    return MarketSessionService.isMarketOpenForStock(currentStock);
   }, [currentStock]);
 
   const defaultShares = useMemo(() => {
@@ -554,6 +560,16 @@ export const TabConsensus: React.FC<TabConsensusProps> = ({
                       {currentStock.cleanSymbol} • {consensus.entryPrice.toFixed(2)} zł
                     </span>
                   </div>
+
+                  {!marketStatus.isOpen && (
+                    <div className="p-2.5 rounded-xl bg-amber-950/60 border border-amber-500/60 text-amber-200 text-[11px] flex items-start gap-2">
+                      <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                      <div>
+                        <span className="font-bold block text-amber-300">Handel Wstrzymany: Rynek Zamknięty ({marketStatus.marketName})</span>
+                        <span className="text-[10px] text-amber-200/90 block leading-tight">{marketStatus.reason}</span>
+                      </div>
+                    </div>
+                  )}
 
                   {/* 1. Target Portfolio Selector */}
                   <div>

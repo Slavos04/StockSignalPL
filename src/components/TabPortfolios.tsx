@@ -473,35 +473,52 @@ function generateBarsForTimeRange(
 const CustomTooltip = ({ active, payload, label, displayMode }: any) => {
   if (!active || !payload || !payload.length) return null;
   const data = payload[0].payload;
+
+  const portVal = displayMode === 'percent' ? data.portfolioReturn : data.portfolioVal;
+  const wigVal = displayMode === 'percent' ? data.wig20Return : (data.scaledWig20Val ?? data.wig20Val);
+
+  // Układanie wskaźników wg wielkości wartości w danym punkcie (najwyższa wartość na samej górze)
+  const items = [
+    {
+      id: 'portfolio',
+      label: 'Portfel:',
+      valNum: portVal,
+      colorClass: 'text-emerald-400',
+      dotClass: 'bg-emerald-400',
+      formatted: displayMode === 'percent'
+        ? `${data.portfolioReturn >= 0 ? '+' : ''}${data.portfolioReturn.toFixed(2)}% (${data.portfolioVal.toLocaleString('pl-PL')} PLN)`
+        : `${data.portfolioVal.toLocaleString('pl-PL')} PLN (${data.portfolioReturn >= 0 ? '+' : ''}${data.portfolioReturn.toFixed(2)}%)`
+    },
+    {
+      id: 'wig20',
+      label: 'WIG20:',
+      valNum: wigVal,
+      colorClass: 'text-slate-400',
+      dotClass: 'bg-slate-500',
+      formatted: displayMode === 'percent'
+        ? `${data.wig20Return >= 0 ? '+' : ''}${data.wig20Return.toFixed(2)}% (${data.wig20Val.toLocaleString('pl-PL')} PLN)`
+        : `${(data.scaledWig20Val ?? data.wig20Val).toLocaleString('pl-PL')} PLN (${data.wig20Return >= 0 ? '+' : ''}${data.wig20Return.toFixed(2)}%)`
+    }
+  ].sort((a, b) => b.valNum - a.valNum);
+
   return (
-    <div className="bg-slate-900/95 border border-slate-700 p-3 rounded-xl shadow-2xl backdrop-blur-md text-xs font-mono z-50">
+    <div className="bg-slate-900/95 border border-slate-700 p-3 rounded-xl shadow-2xl backdrop-blur-md text-xs font-mono z-50 min-w-[250px]">
       <div className="font-sans font-bold text-slate-200 border-b border-slate-800 pb-1 mb-2 flex justify-between items-center gap-4">
         <span>{label}</span>
         <span className="text-[10px] text-slate-400 font-normal">Krzywa Kapitału</span>
       </div>
       <div className="space-y-1.5">
-        <div className="flex items-center justify-between gap-4 text-emerald-400">
-          <span className="flex items-center gap-1.5 font-sans font-semibold">
-            <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
-            Portfel:
-          </span>
-          <span className="font-bold">
-            {displayMode === 'percent'
-              ? `${data.portfolioReturn >= 0 ? '+' : ''}${data.portfolioReturn.toFixed(2)}% (${data.portfolioVal.toLocaleString('pl-PL')} PLN)`
-              : `${data.portfolioVal.toLocaleString('pl-PL')} PLN (${data.portfolioReturn >= 0 ? '+' : ''}${data.portfolioReturn.toFixed(2)}%)`}
-          </span>
-        </div>
-        <div className="flex items-center justify-between gap-4 text-slate-400">
-          <span className="flex items-center gap-1.5 font-sans">
-            <span className="w-2 h-2 rounded-full bg-slate-500"></span>
-            WIG20:
-          </span>
-          <span>
-            {displayMode === 'percent'
-              ? `${data.wig20Return >= 0 ? '+' : ''}${data.wig20Return.toFixed(2)}% (${data.wig20Val.toLocaleString('pl-PL')} PLN)`
-              : `${data.scaledWig20Val.toLocaleString('pl-PL')} PLN (${data.wig20Return >= 0 ? '+' : ''}${data.wig20Return.toFixed(2)}%)`}
-          </span>
-        </div>
+        {items.map((item) => (
+          <div key={item.id} className="flex items-center justify-between gap-4">
+            <span className="flex items-center gap-1.5 font-sans font-semibold text-slate-300">
+              <span className={`w-2 h-2 rounded-full ${item.dotClass}`}></span>
+              {item.label}
+            </span>
+            <span className={`font-bold ${item.id === 'portfolio' ? 'text-emerald-400' : 'text-slate-300'}`}>
+              {item.formatted}
+            </span>
+          </div>
+        ))}
         <div className="pt-1.5 mt-1 border-t border-slate-800/80 flex items-center justify-between gap-4">
           <span className="text-slate-400 font-sans">Przewaga (Alpha):</span>
           <span className={`font-bold ${data.alpha >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
@@ -586,22 +603,30 @@ export function getCommodityUsdPrice(ticker: string, pricePln: number): string |
 
 const AllPortfoliosTooltip = ({ active, payload, label, displayMode }: any) => {
   if (!active || !payload || !payload.length) return null;
+
+  // Sortuj pozycje w legendzie zwięźle i dynamicznie wg wielkości wartości (najwyższa wartość na samej górze, najniższa na dole)
+  const sortedPayload = [...payload].sort((a: any, b: any) => {
+    const valA = typeof a.value === 'number' ? a.value : -Infinity;
+    const valB = typeof b.value === 'number' ? b.value : -Infinity;
+    return valB - valA;
+  });
+
   return (
-    <div className="bg-slate-900/95 border border-slate-700/80 rounded-xl p-3.5 shadow-2xl backdrop-blur-md text-xs font-mono min-w-[260px] z-50">
+    <div className="bg-slate-900/95 border border-slate-700/80 rounded-xl p-3.5 shadow-2xl backdrop-blur-md text-xs font-mono min-w-[270px] z-50">
       <p className="text-slate-400 font-semibold mb-2.5 pb-1 border-b border-slate-800 text-[11px] font-sans flex items-center justify-between">
         <span className="text-slate-400">Okres / Sesja:</span>
         <span className="text-white font-mono">{label}</span>
       </p>
-      <div className="space-y-1.5 max-h-60 overflow-y-auto no-scrollbar">
-        {payload.map((item: any, idx: number) => {
+      <div className="space-y-1.5 max-h-64 overflow-y-auto no-scrollbar">
+        {sortedPayload.map((item: any, idx: number) => {
           const val = item.value;
           const formatted = displayMode === 'percent'
             ? `${val >= 0 ? '+' : ''}${typeof val === 'number' ? val.toFixed(2) : val}%`
             : `${typeof val === 'number' ? val.toLocaleString('pl-PL') : val} zł`;
           return (
             <div key={idx} className="flex items-center justify-between gap-4">
-              <span className="flex items-center gap-1.5 text-slate-300 font-sans text-[11px] truncate max-w-[160px]">
-                <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: item.color }} />
+              <span className="flex items-center gap-1.5 text-slate-300 font-sans text-[11px] truncate max-w-[170px]">
+                <span className="w-2.5 h-2.5 rounded-full shrink-0 shadow-sm" style={{ backgroundColor: item.color }} />
                 <span>{item.name}</span>
               </span>
               <span className={`font-bold shrink-0 ${displayMode === 'percent' ? (val >= 0 ? 'text-emerald-400' : 'text-rose-400') : 'text-white'}`}>
