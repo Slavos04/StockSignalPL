@@ -118,6 +118,8 @@ export interface StockConsensus {
   timestamp: string;
 }
 
+export type PositionSide = 'LONG' | 'SHORT';
+
 export interface PositionItem {
   id: string;
   ticker: string;
@@ -132,6 +134,7 @@ export interface PositionItem {
   tp2Reached: boolean;
   tp3Reached: boolean;
   stopLoss: number;
+  positionSide?: PositionSide; // LONG (wzrost) lub SHORT (spadek)
   status: 'AKTYWNA' | 'ZREALIZOWANO TP1' | 'ZREALIZOWANO TP2' | 'ZAMKNIĘTO ZYSK' | 'STOP LOSS';
   pnlPln: number;
   pnlPercent: number;
@@ -140,6 +143,18 @@ export interface PositionItem {
 
 export type AllowedMarketFilter = 'ALL' | 'GPW' | 'Surowce' | 'NewConnect' | 'FW20';
 export type MarketSegment = 'GPW' | 'Surowce' | 'NewConnect' | 'FW20';
+
+export interface AutoPilotLogItem {
+  id: string;
+  timestamp: string;
+  ticker: string;
+  action: 'KUPNO_LONG' | 'KUPNO_SHORT' | 'SPRZEDAŻ_TP' | 'SPRZEDAŻ_SL' | 'AUTO_CUT' | 'POMINIĘTO';
+  confidence: number;
+  riskRewardRatio: number;
+  reason: string;
+  portfolioId: string;
+  portfolioName: string;
+}
 
 export interface PortfolioStrategy {
   id: string;
@@ -160,6 +175,31 @@ export interface PortfolioStrategy {
   winRate: number;
   autoPilotEnabled: boolean;
   telegramEnabled: boolean;
+
+  // Zaawansowane parametry Auto-Pilota & Ochrony Kapitału (Zbieżne z CryptoSignal Engine)
+  orderExecutionType?: 'MARKET' | 'LIMIT_ZONE';
+  positionSizingModel?: 'FIXED_PERCENT' | 'KELLY' | 'VOLATILITY_ATR';
+  stopLossTrailingMode?: 'BREAK_EVEN_TP1' | 'TRAILING_ATR' | 'SWING_LOW';
+  categoryAllocationLimit?: number; // np. 40%
+  allowPyramiding?: boolean;        // Dokupowanie kolejnej partii po osiągnięciu TP1
+  multiTpBreakEvenEnabled?: boolean; // Podział 33/33/34% + przesunięcie SL na Break-Even
+  
+  // Benchmark Leader Tracking & Lag (Śledzenie Waloru Wiodącego)
+  anchorLeaderTracking?: boolean;
+  anchorLeaderTicker?: string;      // np. 'WIG20', 'FW2020.PL', 'CB.F', 'XAUUSD'
+  anchorLeaderTrendMode?: 'STRICT_SAME_DIRECTION' | 'MOMENTUM_CONFIRMATION' | 'CONTRARIAN_HEDGE';
+  anchorLeaderCorrelation?: number; // 50% - 95%
+  anchorLeaderLagMinutes?: number;  // 0 - 240 min
+
+  autoPilotMinConfidence?: number;     // np. 76% min. pewności konsensusu
+  autoPilotMinRiskReward?: number;     // np. 2.0:1 min R:R
+  autoPilotMaxPositions?: number;      // np. 5 max pozycji jednocześnie
+  autoPilotAllocationPercent?: number; // np. 15% wolnej gotówki per zlecenie
+  drawdownLockCap?: number;            // np. -15% max osuwisko kapitału
+  drawdownLockActive?: boolean;        // Stan blokady osuwiska
+  autoCutWeakConsensus?: boolean;      // Automatyczne zamykanie pozycji gdy Konsensus < 45%
+  autoPilotLogs?: AutoPilotLogItem[];  // Dziennik audytowy decyzji bota
+
   activePositions: PositionItem[];
   historyData: { date: string; portfolioVal: number; wig20Val: number }[];
 }
@@ -169,7 +209,8 @@ export interface TradeRecord {
   date: string;
   ticker: string;
   name: string;
-  type: 'KUPNO' | 'SPRZEDAŻ';
+  type: 'KUPNO' | 'SPRZEDAŻ' | 'KUPNO_SHORT' | 'ZAMKNIĘCIE_SHORT';
+  positionSide?: PositionSide;
   pricePln: number;
   shares: number;
   totalPln: number;
@@ -177,7 +218,8 @@ export interface TradeRecord {
   resultPercent: number;
   strategyId: string;
   reason: string;
-  status: 'ZYSK (TP)' | 'STRATA (SL)' | 'REBALANCE' | 'AUTO-PILOT';
+  status: 'ZYSK (TP)' | 'STRATA (SL)' | 'REBALANCE' | 'AUTO-PILOT' | 'RĘCZNE' | 'AUTO_CUT';
+  notes?: string;
 }
 
 export interface UserAccount {
@@ -201,11 +243,14 @@ export interface TelegramSettings {
 }
 
 export type AppTheme = 'dark' | 'light' | 'ocean' | 'forrest';
+export type AppCurrency = 'PLN' | 'USD';
 
 export interface AppSettings {
   theme: AppTheme;
   customBgUrl: string;
   refreshIntervalSec: number;
+  currency?: AppCurrency;     // PLN (zł) lub USD ($)
+  usdPlnRate?: number;        // Aktuany kurs USD/PLN z NBP / Stooq (domyślnie ~4.02)
   bgOpacity?: number; // 0 to 100 (default 85 = clear visibility, less dark overlay)
   bgBlur?: number;    // 0 to 20 px (default 0 = crisp background)
   forceSessionOpenTest?: boolean; // Opcjonalne wymuszenie symulacji sesji giełdowej w celach testowych
@@ -233,4 +278,5 @@ export interface AutoPilotNotification {
   resultPln?: number;
   timestamp: string;
 }
+
 

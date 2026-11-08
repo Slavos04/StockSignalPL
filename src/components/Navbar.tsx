@@ -1,6 +1,7 @@
 import React from 'react';
 import { UserAccount, FearGreedData, StockQuote, PortfolioStrategy, PositionItem } from '../types/stock';
 import { MarketSessionInfo } from '../services/marketSessionService';
+import { SettingsService } from '../services/settingsService';
 import {
   ShieldCheck,
   User,
@@ -383,16 +384,31 @@ export const Navbar: React.FC<NavbarProps> = ({
             {/* Info Icon Button (i) */}
             <button
               onClick={onOpenInfoModal}
-              title="Informacje o programie StockSignalPL, numer wersji (v2.1) oraz pełny Changelog"
+              title="Informacje o programie StockSignalPL, numer wersji (v2.2) oraz pełny Changelog"
               className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 transition-colors cursor-pointer"
             >
               <Info className="w-4 h-4 text-sky-400" />
             </button>
 
+            {/* Currency Switcher ($ USD / zł PLN) */}
+            <button
+              onClick={() => {
+                const currentSettings = SettingsService.getSettings();
+                const nextCurrency = currentSettings.currency === 'USD' ? 'PLN' : 'USD';
+                SettingsService.saveSettings({ currency: nextCurrency });
+                if (onOpenSettingsModal) onOpenSettingsModal();
+              }}
+              title="Przełącznik Waluty Wyświetlania: PLN (zł) / USD ($) po kursie NBP"
+              className="px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-bold text-emerald-400 border border-slate-700 flex items-center gap-1.5 transition-colors cursor-pointer"
+            >
+              <span className="text-yellow-400 font-extrabold">{SettingsService.getSettings().currency === 'USD' ? '$' : 'zł'}</span>
+              <span>{SettingsService.getSettings().currency === 'USD' ? 'USD' : 'PLN'}</span>
+            </button>
+
             {/* Settings Gear Button (zębatka) */}
             <button
               onClick={onOpenSettingsModal}
-              title="Ustawienia: zmiana motywu (jasny, ciemny, ocean, forrest), własne tło, czas odświeżania i bot Telegram"
+              title="Ustawienia: zmiana motywu (jasny, ciemny, ocean, forrest), waluta ($/zł), własne tło i czas odświeżania"
               className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 transition-colors cursor-pointer"
             >
               <Settings className="w-4 h-4 text-sky-400" />

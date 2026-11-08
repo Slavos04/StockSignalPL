@@ -16,6 +16,47 @@ CHANGELOG - HISTORIA ZMIAN I WERSJI STOCKSIGNALPL
 ================================================================================
 
 ================================================================================
+Wersja 2.2 (2026-11-08) - Pełna Implementacja Silnika Portfeli CryptoSignal Engine, Dwuwalutowość ($ USD / zł PLN), Pozycje SHORT, Smart Rebalance i Audyt Bota
+================================================================================
+1. PEŁNA PARITYCZNA IMPLEMENTACJA MECHANIZMÓW Z CRYPTOSIGNAL ENGINE NA RYNKU AKCJI I SUROWCÓW:
+   - Wdrożono 6-sekcyjny modularny panel konfiguracyjny strategii portfelowej (EditPortfolioModal):
+     * Sekcja 1: Podstawowe parametry, profil ryzyka oraz wielokrotny wybór dopuszczalnych rynków (checkboxy: GPW, Surowce, NewConnect, FW20).
+     * Sekcja 2: Silnik Operacyjny i Sposób Realizacji Zleceń:
+       - Typ egzekucji zleceń: Market (natychmiastowe wejście) vs Limit Entry Zone (strefa wsparcia).
+       - Model wielkości pozycji: Stały Procent Wolnej Gotówki, Kelly Criterion lub ATR Volatility Sizing.
+       - Prowadzenie zlecenia Stop Loss: Break-Even po TP1, Krokowy Trailing ATR (0.8x ATR), Podążanie za Swing Low.
+       - Limit alokacji per kategoria: Płynny suwak 10% - 100%.
+     * Sekcja 3: Ochrona Kapitału i Progi Bezpieczeństwa:
+       - Limit Max Osuwiska (Drawdown Lock): Konfigurowalny suwak (-5% do -35%) z automatyczną blokadą otwierania pozycji w przypadku przekroczenia progu.
+       - Auto-Cięcie Stratnych Pozycji: Automatyczne zamykanie zleceń, gdy konsensus rynkowy spadnie poniżej 45%.
+       - Piramidowanie (Scaling-In): Opcja dokupowania kolejnej partii aktywa po osiągnięciu TP1.
+     * Sekcja 4: Zasady i Progi Auto-Pilota:
+       - Min. Pewność Sygnału (60% - 90%), Min. Stosunek Zysk/Ryzyko (1.2:1 - 4.0:1), Max Pozycji Jednocześnie (1 - 10), Alokacja per Pozycja (5% - 40%).
+     * Sekcja 5: Podział Zysków Multi-TP (33/33/34%) & Alerty Telegram Bot API.
+     * Sekcja 6: Śledzenie Waloru Wiodącego (Benchmark Leader Tracking & Lag):
+       - Anchor Leader: WIG20, Kontrakt FW20 (FW2020.PL), Ropa Brent (CB.F) lub Złoto (XAUUSD).
+       - Tryb filtracji trendu: Ścisła Zgodność Kierunku, Potwierdzenie Pędu 24h, Zabezpieczenie Kontrariańskie (Hedge).
+       - Czułość korelacji (50% - 95%) oraz opóźnienie weryfikacji lag (0 min - 240 min).
+
+2. PRZEŁĄCZNIK WALUT W BELCE GÓRNEJ ($ USD / ZŁ PLN) PO KURSIE NBP:
+   - Dodano interaktywny przycisk waluty ($ USD / zł PLN) w górnej belce obok ustawień.
+   - Globalne przeliczanie całego portfela i wycen rynkowych w oparciu o oficjalny kurs NBP (~4.02 USD/PLN).
+
+3. TRANSAKCJE DWUKIERUNKOWE: POZYCJE DŁUGIE (LONG) I KRÓTKIE (SHORT):
+   - Wdrożono pełną obsługę pozycji krótkich (gra na spadki cen akcji, surowców i kontraktów FW20).
+   - Odwrócone wyliczanie PnL dla pozycji SHORT ((Cena Wejścia - Kurs Aktualny) * Ilość) oraz odwrócone poziomy Take Profit i Stop Loss.
+   - Oznaczenia plakietkami SHORT w tabelach otwartych pozycji i dzienniku transakcji.
+
+4. SMART REBALANCE & AUDYT LOGÓW AUTO-PILOTA:
+   - Dedykowany modal Smart Rebalance analizujący wagi portfela, odcinający słabe walory i optymalizujący rezerwę gotówkową.
+   - Modal Logów Bota (AutoPilotLogsModal) rejestrujący krok po kroku powody otwarcia, pominięcia lub auto-cięcia pozycji.
+
+5. DZIENNIK TRADERA, EKSPORT CSV I ZARZĄDZANIE PORTFELEM:
+   - Możliwość dodawania i edycji notatek do zrealizowanych transakcji.
+   - Eksport do formatu CSV (z obsługą polskich znaków UTF-8 BOM) dla otwartych pozycji oraz historii transakcji.
+   - Płynny reset kapitału portfela oraz bezpowrotne usuwanie portfela.
+
+================================================================================
 Wersja 2.1 (2026-11-07) - Multi-Market Checkboxy dla Auto-Pilota, Edycja Strategii Portfela, Zasilanie Gotówkowe & Korekta Tickerów GPW i Surowców
 ================================================================================
 1. WIELOKROTNA SEGMENTACJA RYNKU DLA AUTO-PILOTA (CHECKBOXY):
@@ -429,7 +470,7 @@ Wersja 1.0 (2026-11-04) - Oficjalne Wydanie StockSignalPl
                   <span className="text-emerald-400">PL</span>
                 </h3>
                 <span className="px-2 py-0.5 text-xs font-bold bg-emerald-950 text-emerald-300 border border-emerald-500/60 rounded-full shadow-sm">
-                  v2.1
+                  v2.2
                 </span>
               </div>
               <p className="text-xs text-slate-400">Polski Rynek Giełdowy GPW Warszawa & Rynek Surowców</p>

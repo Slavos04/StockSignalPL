@@ -1,4 +1,4 @@
-import { AppSettings, AppTheme } from '../types/stock';
+import { AppSettings, AppTheme, AppCurrency } from '../types/stock';
 
 const SETTINGS_STORAGE_KEY = 'stocksignalpl_settings_v1_1';
 
@@ -7,6 +7,8 @@ export class SettingsService {
     theme: 'dark',
     customBgUrl: '',
     refreshIntervalSec: 4,
+    currency: 'PLN',
+    usdPlnRate: 4.02,
     bgOpacity: 80,
     bgBlur: 0,
     forceSessionOpenTest: false
@@ -44,4 +46,17 @@ export class SettingsService {
       document.body.setAttribute('data-theme', theme);
     }
   }
+
+  public static formatMoney(plnValue: number, settings?: AppSettings): string {
+    const currentSettings = settings || this.getSettings();
+    const curr = currentSettings.currency || 'PLN';
+    const rate = currentSettings.usdPlnRate || 4.02;
+
+    if (curr === 'USD') {
+      const usd = plnValue / rate;
+      return `$${usd.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    }
+    return `${plnValue.toLocaleString('pl-PL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} zł`;
+  }
 }
+

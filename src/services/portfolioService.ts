@@ -210,6 +210,23 @@ export class PortfolioService {
       allowedMarket?: AllowedMarketFilter;
       autoPilotEnabled?: boolean;
       telegramEnabled?: boolean;
+      autoPilotMinConfidence?: number;
+      autoPilotMinRiskReward?: number;
+      autoPilotMaxPositions?: number;
+      autoPilotAllocationPercent?: number;
+      drawdownLockCap?: number;
+      autoCutWeakConsensus?: boolean;
+      orderExecutionType?: 'MARKET' | 'LIMIT_ZONE';
+      positionSizingModel?: 'FIXED_PERCENT' | 'KELLY' | 'VOLATILITY_ATR';
+      stopLossTrailingMode?: 'BREAK_EVEN_TP1' | 'TRAILING_ATR' | 'SWING_LOW';
+      categoryAllocationLimit?: number;
+      allowPyramiding?: boolean;
+      multiTpBreakEvenEnabled?: boolean;
+      anchorLeaderTracking?: boolean;
+      anchorLeaderTicker?: string;
+      anchorLeaderTrendMode?: 'STRICT_SAME_DIRECTION' | 'MOMENTUM_CONFIRMATION' | 'CONTRARIAN_HEDGE';
+      anchorLeaderCorrelation?: number;
+      anchorLeaderLagMinutes?: number;
       addCashPln?: number;
     }
   ): { success: boolean; message: string; portfolio?: PortfolioStrategy } {
@@ -223,6 +240,23 @@ export class PortfolioService {
     if (updates.allowedMarket !== undefined) portfolio.allowedMarket = updates.allowedMarket;
     if (updates.autoPilotEnabled !== undefined) portfolio.autoPilotEnabled = updates.autoPilotEnabled;
     if (updates.telegramEnabled !== undefined) portfolio.telegramEnabled = updates.telegramEnabled;
+    if (updates.autoPilotMinConfidence !== undefined) portfolio.autoPilotMinConfidence = updates.autoPilotMinConfidence;
+    if (updates.autoPilotMinRiskReward !== undefined) portfolio.autoPilotMinRiskReward = updates.autoPilotMinRiskReward;
+    if (updates.autoPilotMaxPositions !== undefined) portfolio.autoPilotMaxPositions = updates.autoPilotMaxPositions;
+    if (updates.autoPilotAllocationPercent !== undefined) portfolio.autoPilotAllocationPercent = updates.autoPilotAllocationPercent;
+    if (updates.drawdownLockCap !== undefined) portfolio.drawdownLockCap = updates.drawdownLockCap;
+    if (updates.autoCutWeakConsensus !== undefined) portfolio.autoCutWeakConsensus = updates.autoCutWeakConsensus;
+    if (updates.orderExecutionType !== undefined) portfolio.orderExecutionType = updates.orderExecutionType;
+    if (updates.positionSizingModel !== undefined) portfolio.positionSizingModel = updates.positionSizingModel;
+    if (updates.stopLossTrailingMode !== undefined) portfolio.stopLossTrailingMode = updates.stopLossTrailingMode;
+    if (updates.categoryAllocationLimit !== undefined) portfolio.categoryAllocationLimit = updates.categoryAllocationLimit;
+    if (updates.allowPyramiding !== undefined) portfolio.allowPyramiding = updates.allowPyramiding;
+    if (updates.multiTpBreakEvenEnabled !== undefined) portfolio.multiTpBreakEvenEnabled = updates.multiTpBreakEvenEnabled;
+    if (updates.anchorLeaderTracking !== undefined) portfolio.anchorLeaderTracking = updates.anchorLeaderTracking;
+    if (updates.anchorLeaderTicker !== undefined) portfolio.anchorLeaderTicker = updates.anchorLeaderTicker;
+    if (updates.anchorLeaderTrendMode !== undefined) portfolio.anchorLeaderTrendMode = updates.anchorLeaderTrendMode;
+    if (updates.anchorLeaderCorrelation !== undefined) portfolio.anchorLeaderCorrelation = updates.anchorLeaderCorrelation;
+    if (updates.anchorLeaderLagMinutes !== undefined) portfolio.anchorLeaderLagMinutes = updates.anchorLeaderLagMinutes;
 
     if (updates.addCashPln && updates.addCashPln > 0) {
       portfolio.cashPln += updates.addCashPln;
@@ -234,6 +268,27 @@ export class PortfolioService {
     return {
       success: true,
       message: `Strategia portfela "${portfolio.name}" została pomyślnie zaktualizowana!`,
+      portfolio
+    };
+  }
+
+  public static resetPortfolio(id: string): { success: boolean; message: string; portfolio?: PortfolioStrategy } {
+    const portfolio = this.getPortfolio(id);
+    if (!portfolio) return { success: false, message: 'Nie znaleziono portfela do zresetowania.' };
+
+    portfolio.cashPln = portfolio.initialCapital;
+    portfolio.allocatedPln = 0;
+    portfolio.currentBalance = portfolio.initialCapital;
+    portfolio.totalProfitPln = 0;
+    portfolio.totalProfitPercent = 0;
+    portfolio.activePositions = [];
+    portfolio.autoPilotLogs = [];
+    portfolio.drawdownLockActive = false;
+
+    this.savePortfolios();
+    return {
+      success: true,
+      message: `Portfel "${portfolio.name}" został zresetowany do kapitału początkowego ${portfolio.initialCapital.toLocaleString('pl-PL')} PLN.`,
       portfolio
     };
   }
@@ -251,6 +306,14 @@ export class PortfolioService {
     this.portfolios.splice(idx, 1);
     this.savePortfolios();
     return { success: true, message: `Portfel "${deletedName}" został pomyślnie usunięty.` };
+  }
+
+  public static addAutoPilotLog(portfolio: PortfolioStrategy, logItem: import('../types/stock').AutoPilotLogItem): void {
+    if (!portfolio.autoPilotLogs) portfolio.autoPilotLogs = [];
+    portfolio.autoPilotLogs.unshift(logItem);
+    if (portfolio.autoPilotLogs.length > 100) {
+      portfolio.autoPilotLogs = portfolio.autoPilotLogs.slice(0, 100);
+    }
   }
 
   public static toggleAutoPilot(portfolioId: string): boolean {
@@ -338,9 +401,14 @@ export class PortfolioService {
     }
 
     const closePrice = pos.currentPrice;
+    const isShort = pos.positionSide === 'SHORT';
     const totalReturnPln = Number((pos.shares * closePrice).toFixed(2));
-    const pnlPln = Number(((closePrice - pos.entryPrice) * pos.shares).toFixed(2));
-    const pnlPercent = Number((((closePrice - pos.entryPrice) / pos.entryPrice) * 100).toFixed(2));
+    const pnlPln = isShort
+      ? Number(((pos.entryPrice - closePrice) * pos.shares).toFixed(2))
+      : Number(((closePrice - pos.entryPrice) * pos.shares).toFixed(2));
+    const pnlPercent = isShort
+      ? Number((((pos.entryPrice - closePrice) / pos.entryPrice) * 100).toFixed(2))
+      : Number((((closePrice - pos.entryPrice) / pos.entryPrice) * 100).toFixed(2));
 
     // Zwróć gotówkę do salda portfela
     portfolio.cashPln = Number((portfolio.cashPln + totalReturnPln).toFixed(2));
@@ -390,7 +458,8 @@ export class PortfolioService {
     score: number,
     entryPrice: number,
     targetPortfolioId?: string,
-    customShares?: number
+    customShares?: number,
+    positionSide: 'LONG' | 'SHORT' = 'LONG'
   ): { success: boolean; message: string; position?: PositionItem; portfolioName?: string } {
     // Weryfikacja czy rynek dla waloru jest obecnie otwarty
     const forceTest = SettingsService.getSettings().forceSessionOpenTest;
@@ -415,19 +484,11 @@ export class PortfolioService {
     }
     if (!portfolio) return { success: false, message: 'Brak aktywnego portfela' };
 
-    // Jednostka miary waloru
-    const unit = stock.market === 'Surowce'
-      ? (stock.cleanSymbol === 'XAU' || stock.cleanSymbol === 'XPT' || stock.cleanSymbol === 'XAG' ? 'uncji (oz)' :
-         stock.cleanSymbol === 'BRENT' || stock.cleanSymbol === 'WTI' ? 'baryłek (bbl)' :
-         stock.cleanSymbol === 'WHEAT' ? 'buszli (bu)' :
-         stock.cleanSymbol === 'GAS' ? 'kontr.' :
-         stock.cleanSymbol === 'COPPER' ? 'funtów (lbs)' : 'jedn.')
-      : (stock.market === 'FW20' ? 'kontr.' : 'szt.');
-
-    // Wyznaczenie wolumenu: customShares lub domyślne 8% kapitału
+    // Wyznaczenie wolumenu: customShares lub alokacja % z konfigu
     let shares = customShares && customShares > 0 ? customShares : 0;
     if (!shares) {
-      const maxAlloc = portfolio.currentBalance * 0.08;
+      const allocPct = (portfolio.autoPilotAllocationPercent || 15) / 100;
+      const maxAlloc = portfolio.currentBalance * allocPct;
       shares = Math.max(1, Math.floor(maxAlloc / entryPrice));
     }
     const totalPln = Number((shares * entryPrice).toFixed(2));
@@ -442,10 +503,11 @@ export class PortfolioService {
     portfolio.cashPln -= totalPln;
     portfolio.allocatedPln += totalPln;
 
-    const tp1 = Number((entryPrice * 1.032).toFixed(2));
-    const tp2 = Number((entryPrice * 1.065).toFixed(2));
-    const tp3 = Number((entryPrice * 1.118).toFixed(2));
-    const sl = Number((entryPrice * 0.972).toFixed(2));
+    const isShort = positionSide === 'SHORT';
+    const tp1 = isShort ? Number((entryPrice * 0.968).toFixed(2)) : Number((entryPrice * 1.032).toFixed(2));
+    const tp2 = isShort ? Number((entryPrice * 0.935).toFixed(2)) : Number((entryPrice * 1.065).toFixed(2));
+    const tp3 = isShort ? Number((entryPrice * 0.882).toFixed(2)) : Number((entryPrice * 1.118).toFixed(2));
+    const sl  = isShort ? Number((entryPrice * 1.028).toFixed(2)) : Number((entryPrice * 0.972).toFixed(2));
 
     const newPosition: PositionItem = {
       id: `pos_${Date.now()}`,
@@ -461,6 +523,7 @@ export class PortfolioService {
       tp2Reached: false,
       tp3Reached: false,
       stopLoss: sl,
+      positionSide,
       status: 'AKTYWNA',
       pnlPln: 0,
       pnlPercent: 0,
@@ -468,6 +531,18 @@ export class PortfolioService {
     };
 
     portfolio.activePositions.unshift(newPosition);
+
+    this.addAutoPilotLog(portfolio, {
+      id: `log_${Date.now()}`,
+      timestamp: new Date().toLocaleTimeString('pl-PL'),
+      ticker: stock.symbol,
+      action: isShort ? 'KUPNO_SHORT' : 'KUPNO_LONG',
+      confidence: score,
+      riskRewardRatio: 2.8,
+      reason: `Zlecenie ${isShort ? 'SHORT (Gra na spadki)' : 'LONG (Gra na wzrosty)'}: Konsensus ${score}% >= ${(portfolio.autoPilotMinConfidence || 76)}%`,
+      portfolioId: portfolio.id,
+      portfolioName: portfolio.name
+    });
     portfolio.tradesCount += 1;
 
     // Dziennik Tradera
@@ -493,7 +568,7 @@ export class PortfolioService {
 
     return {
       success: true,
-      message: `Zlecenie zrealizowane! Zakupiono ${shares} ${unit} ${stock.symbol} za kwotę ${totalPln.toLocaleString('pl-PL')} PLN. Pozycja została dodana do: "${portfolio.name}".`,
+      message: `Zlecenie zrealizowane! Zakupiono ${shares} szt. ${stock.symbol} za kwotę ${totalPln.toLocaleString('pl-PL')} PLN. Pozycja została dodana do: "${portfolio.name}".`,
       position: newPosition,
       portfolioName: portfolio.name
     };
@@ -811,7 +886,50 @@ export class PortfolioService {
       if (!isStrongBuy) return;
 
       activePortfolios.forEach(portfolio => {
-        // Weryfikacja ograniczeń rynkowych w strategii tego portfela (checkboxy rynków)
+        // Sprawdź Blokadę Osuwiska Kapitału (Drawdown Lock Cap)
+        const currentDd = portfolio.initialCapital > 0
+          ? ((portfolio.currentBalance - portfolio.initialCapital) / portfolio.initialCapital) * 100
+          : 0;
+        const maxDdCap = portfolio.drawdownLockCap !== undefined ? portfolio.drawdownLockCap : -15;
+
+        if (currentDd <= maxDdCap) {
+          portfolio.drawdownLockActive = true;
+          this.addAutoPilotLog(portfolio, {
+            id: `log_${Date.now()}`,
+            timestamp: new Date().toLocaleTimeString('pl-PL'),
+            ticker: 'DRAWDOWN_LOCK',
+            action: 'POMINIĘTO',
+            confidence: 0,
+            riskRewardRatio: 0,
+            reason: `Blokada Osuwiska Kapitału: Spadek (${currentDd.toFixed(1)}%) przekroczył próg (${maxDdCap}%). Wstrzymano zakupy.`,
+            portfolioId: portfolio.id,
+            portfolioName: portfolio.name
+          });
+          return;
+        }
+
+        // Auto-Cięcie osłabionego konsensusu (<45%)
+        if (portfolio.autoCutWeakConsensus && portfolio.activePositions.length > 0) {
+          portfolio.activePositions.forEach(pos => {
+            const currentStock = stockQuotes.find(s => s.symbol === pos.ticker || s.cleanSymbol === pos.ticker);
+            if (currentStock && (currentStock.trendScore || 50) < 45) {
+              this.closePosition(portfolio.id, pos.id);
+              this.addAutoPilotLog(portfolio, {
+                id: `log_${Date.now()}`,
+                timestamp: new Date().toLocaleTimeString('pl-PL'),
+                ticker: pos.ticker,
+                action: 'AUTO_CUT',
+                confidence: currentStock.trendScore || 40,
+                riskRewardRatio: 0,
+                reason: `Auto-Cięcie Risk Management: Konsensus spadł do ${currentStock.trendScore || 40}% (<45%). Zamykanie pozycji.`,
+                portfolioId: portfolio.id,
+                portfolioName: portfolio.name
+              });
+            }
+          });
+        }
+
+        // Weryfikacja ograniczeń rynkowych w strategii tego portfela
         if (!this.isStockMarketAllowed(portfolio, stock.market)) return;
 
         // Sprawdź czy portfel nie posiada już aktywnej pozycji w tym walorze
@@ -822,11 +940,29 @@ export class PortfolioService {
 
         if (alreadyHolds) return;
 
-        // Ogranicz liczbę pozycji w jednym portfelu do max 8
-        if (portfolio.activePositions.length >= 8) return;
+        // Limit jednoczesnych pozycji
+        const maxPos = portfolio.autoPilotMaxPositions || 5;
+        if (portfolio.activePositions.length >= maxPos) {
+          this.addAutoPilotLog(portfolio, {
+            id: `log_${Date.now()}`,
+            timestamp: new Date().toLocaleTimeString('pl-PL'),
+            ticker: stock.symbol,
+            action: 'POMINIĘTO',
+            confidence: stock.trendScore || 80,
+            riskRewardRatio: 2.5,
+            reason: `Pominięto ${stock.symbol}: Osiągnięto limit ${maxPos} pozycji jednoczesnych w portfelu.`,
+            portfolioId: portfolio.id,
+            portfolioName: portfolio.name
+          });
+          return;
+        }
+
+        // Min Pewność Konsensusu
+        const minConf = portfolio.autoPilotMinConfidence || 76;
+        if ((stock.trendScore || 70) < minConf) return;
 
         // Spróbuj dokonać zakupu Auto-Pilota
-        const result = this.executeAutoPilotSignal(stock, stock.trendScore || 82, stock.price, portfolio.id);
+        const result = this.executeAutoPilotSignal(stock, stock.trendScore || 82, stock.price, portfolio.id, undefined, 'LONG');
         if (result.success && result.position) {
           AudioService.playBuyChime();
           const timestamp = new Date().toLocaleString('pl-PL', { dateStyle: 'short', timeStyle: 'medium' });
@@ -834,7 +970,7 @@ export class PortfolioService {
             onNotification({
               id: `notif_buy_${Date.now()}`,
               type: 'BUY',
-              title: '🤖 Auto-Pilot: Automatyczne KUPNO GPW',
+              title: '🤖 Auto-Pilot: Automatyczne KUPNO GPW / Surowce',
               message: `Auto-Pilot zakupił ${result.position.shares} szt. ${stock.symbol} za kwotę ${result.position.shares * result.position.entryPrice} PLN w portfelu "${portfolio.name}".`,
               ticker: stock.symbol,
               portfolioName: portfolio.name,
@@ -850,12 +986,61 @@ export class PortfolioService {
   }
 
   /**
+   * Eksport Otwartych Pozycji do formatu CSV
+   */
+  public static exportPositionsToCsv(): void {
+    const portfolios = this.getPortfolios();
+    const headers = ['Portfel', 'Ticker', 'Nazwa', 'Kierunek', 'Ilosc', 'Cena Wejscia (PLN)', 'Aktualna Cena (PLN)', 'Wartosc (PLN)', 'PnL (PLN)', 'PnL (%)', 'Status', 'Data Wejscia'];
+
+    const rows: string[][] = [];
+    portfolios.forEach(p => {
+      p.activePositions.forEach(pos => {
+        rows.push([
+          `"${p.name.replace(/"/g, '""')}"`,
+          pos.ticker,
+          `"${pos.name.replace(/"/g, '""')}"`,
+          pos.positionSide || 'LONG',
+          pos.shares.toString(),
+          pos.entryPrice.toFixed(2),
+          pos.currentPrice.toFixed(2),
+          (pos.shares * pos.currentPrice).toFixed(2),
+          pos.pnlPln.toFixed(2),
+          `${pos.pnlPercent.toFixed(2)}%`,
+          `"${pos.status}"`,
+          `"${pos.entryDate}"`
+        ]);
+      });
+    });
+
+    const csvContent = '\uFEFF' + [headers.join(';'), ...rows.map(r => r.join(';'))].join('\r\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.setAttribute('href', url);
+    link.setAttribute('download', `StockSignalPl_Otwarte_Pozycje_${new Date().toISOString().split('T')[0]}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  }
+
+  /**
+   * Aktualizacja notatki do transakcji
+   */
+  public static updateTradeNote(tradeId: string, note: string): boolean {
+    const trade = this.getTrades().find(t => t.id === tradeId);
+    if (!trade) return false;
+    trade.notes = note.trim();
+    this.saveTrades();
+    return true;
+  }
+
+  /**
    * Eksport Dziennika Tradera do formatu CSV
    */
   public static exportTradesToCsv(): void {
     const trades = this.getTrades();
-    const headers = ['ID', 'Data i Czas', 'Ticker', 'Nazwa Spolki', 'Typ', 'Cena (PLN)', 'Ilosc (szt.)', 'Wartosc (PLN)', 'Wynik (PLN)', 'Wynik (%)', 'Status', 'Powod'];
-    
+    const headers = ['ID', 'Data i Czas', 'Ticker', 'Nazwa Spolki', 'Typ', 'Cena (PLN)', 'Ilosc (szt.)', 'Wartosc (PLN)', 'Wynik (PLN)', 'Wynik (%)', 'Status', 'Notatka', 'Powod'];
+
     const rows = trades.map(t => [
       t.id,
       `"${t.date}"`,
@@ -868,6 +1053,7 @@ export class PortfolioService {
       t.resultPln.toFixed(2),
       `${t.resultPercent.toFixed(2)}%`,
       `"${t.status}"`,
+      `"${(t.notes || '').replace(/"/g, '""')}"`,
       `"${t.reason.replace(/"/g, '""')}"`
     ]);
 

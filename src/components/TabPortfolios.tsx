@@ -15,7 +15,9 @@ import { PortfolioStrategy, TradeRecord, StockQuote, PositionItem, HistoricalBar
 import { PortfolioService } from '../services/portfolioService';
 import { CreatePortfolioModal } from './CreatePortfolioModal';
 import { EditPortfolioModal } from './EditPortfolioModal';
-import { Settings } from 'lucide-react';
+import { SmartRebalanceModal } from './SmartRebalanceModal';
+import { AutoPilotLogsModal } from './AutoPilotLogsModal';
+import { Settings, Bot, FileSpreadsheet } from 'lucide-react';
 import {
   Layers,
   TrendingUp,
@@ -679,6 +681,10 @@ export const TabPortfolios: React.FC<TabPortfoliosProps> = ({
 
   const [chartDisplayMode, setChartDisplayMode] = useState<'percent' | 'pln'>('percent');
   const [portfolioTimeRange, setPortfolioTimeRange] = useState<TimeRange>('6M');
+
+  // Additional Modals for Crypto Engine Feature Parity
+  const [isSmartRebalanceModalOpen, setIsSmartRebalanceModalOpen] = useState<boolean>(false);
+  const [isAutoPilotLogsModalOpen, setIsAutoPilotLogsModalOpen] = useState<boolean>(false);
 
   // Aggregate statistics across all portfolios
   const aggregateStats = useMemo(() => {
@@ -1459,12 +1465,32 @@ export const TabPortfolios: React.FC<TabPortfoliosProps> = ({
                   <p className="text-xs text-slate-400 mt-1">{currentPortfolio.shortDesc}</p>
                 </div>
 
-                {/* Portfolio Control Buttons: AutoPilot, Telegram, Delete, Rebalance */}
+                {/* Portfolio Control Buttons: Edit Strategy, Logs, AutoPilot, Telegram, Rebalance, Delete */}
                 <div className="flex flex-wrap items-center gap-2">
+                  {/* Edytuj Strategię Button */}
+                  <button
+                    onClick={() => setIsEditModalOpen(true)}
+                    title="Otwórz pełną konfigurację strategii: Silnik operacyjny, Ochrona kapitału, Progi Auto-Pilota, Śledzenie Lidera i Rynki"
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-600/20 hover:bg-amber-600/30 text-amber-300 border border-amber-500/50 text-xs font-bold transition-all cursor-pointer shadow-sm"
+                  >
+                    <Settings className="w-3.5 h-3.5 text-amber-400" />
+                    <span>Edytuj Strategię</span>
+                  </button>
+
+                  {/* Logi Bota Button */}
+                  <button
+                    onClick={() => setIsAutoPilotLogsModalOpen(true)}
+                    title="Przeglądaj audytowe logi decyzji bota Auto-Pilota"
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-sky-600/20 hover:bg-sky-600/30 text-sky-300 border border-sky-500/40 text-xs font-bold transition-all cursor-pointer shadow-sm"
+                  >
+                    <Bot className="w-3.5 h-3.5 text-sky-400" />
+                    <span>Logi Bota ({currentPortfolio?.autoPilotLogs?.length || 0})</span>
+                  </button>
+
                   {/* Auto-Pilot Toggle */}
                   <button
                     onClick={handleToggleAutoPilot}
-                    title="Przełącz automatyczne zawieranie transakcji Auto-Pilot (poziom konsensusu >= 76%) dla tego portfela"
+                    title="Przełącz automatyczne zawieranie transakcji Auto-Pilot dla tego portfela"
                     className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all border cursor-pointer ${
                       currentPortfolio.autoPilotEnabled
                         ? 'bg-emerald-950/80 text-emerald-300 border-emerald-500/70 shadow-sm'
@@ -1491,12 +1517,12 @@ export const TabPortfolios: React.FC<TabPortfoliosProps> = ({
 
                   {/* Smart Rebalance Button */}
                   <button
-                    onClick={handleRebalance}
-                    title="Optymalizuje alokację kapitału i zabezpiecza 20% bufor gotówki w PLN"
+                    onClick={() => setIsSmartRebalanceModalOpen(true)}
+                    title="Optymalizuje alokację kapitału i analizuje wagi pozycji w portfelu"
                     className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-bold shadow-md shadow-emerald-950/30 transition-all cursor-pointer"
                   >
                     <RefreshCw className="w-3.5 h-3.5" />
-                    <span>Rebalance</span>
+                    <span>Smart Rebalance</span>
                   </button>
 
                   {/* Delete Portfolio Button */}
@@ -1786,7 +1812,12 @@ export const TabPortfolios: React.FC<TabPortfoliosProps> = ({
                               <td className="py-3 sticky left-0 z-10 bg-slate-900 px-3 font-sans shadow-[2px_0_5px_rgba(0,0,0,0.3)]">
                                 <div className="flex items-center justify-between gap-2 min-w-[150px]">
                                   <div>
-                                    <span className="font-bold text-white block">{pos.ticker}</span>
+                                    <div className="flex items-center gap-1.5">
+                                      <span className="font-bold text-white block">{pos.ticker}</span>
+                                      {pos.positionSide === 'SHORT' && (
+                                        <span className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-rose-950 text-rose-300 border border-rose-800">SHORT</span>
+                                      )}
+                                    </div>
                                     <span className="text-[11px] text-slate-400 block truncate max-w-[95px]">{pos.name}</span>
                                   </div>
                                   <button
@@ -2147,16 +2178,36 @@ export const TabPortfolios: React.FC<TabPortfoliosProps> = ({
 
               {/* Sekcja 2: Zasady Strategii Multi-TP & Modyfikacja */}
               <div>
-                <div className="flex items-center justify-between mb-3">
-                  <h3 className="text-sm font-bold text-white">Zasady Strategii & Rynki Portfela</h3>
-                  <button
-                    onClick={() => setIsEditModalOpen(true)}
-                    className="px-3 py-1.5 rounded-xl bg-amber-600/20 hover:bg-amber-600/30 text-amber-300 border border-amber-500/40 text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer shadow-sm"
-                    title="Modyfikuj strategię, dozwolone rynki, profil ryzyka lub wpłać dodatkowy kapitał"
-                  >
-                    <Settings className="w-3.5 h-3.5 text-amber-400" />
-                    <span>Edytuj Strategię</span>
-                  </button>
+                <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+                  <h3 className="text-sm font-bold text-white">Zasady Strategii & Algorytmy</h3>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      onClick={() => setIsAutoPilotLogsModalOpen(true)}
+                      className="px-2.5 py-1.5 rounded-xl bg-sky-600/20 hover:bg-sky-600/30 text-sky-300 border border-sky-500/40 text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer shadow-sm"
+                      title="Przeglądaj audytowe logi decyzji bota Auto-Pilota"
+                    >
+                      <Bot className="w-3.5 h-3.5 text-sky-400" />
+                      <span>Logi Bota ({currentPortfolio?.autoPilotLogs?.length || 0})</span>
+                    </button>
+
+                    <button
+                      onClick={() => setIsSmartRebalanceModalOpen(true)}
+                      className="px-2.5 py-1.5 rounded-xl bg-teal-600/20 hover:bg-teal-600/30 text-teal-300 border border-teal-500/40 text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer shadow-sm"
+                      title="Optymalizacja wag i algorytmiczne przesunięcie kapitału z uwolnieniem gotówki"
+                    >
+                      <RefreshCw className="w-3.5 h-3.5 text-teal-400" />
+                      <span>Smart Rebalance</span>
+                    </button>
+
+                    <button
+                      onClick={() => setIsEditModalOpen(true)}
+                      className="px-2.5 py-1.5 rounded-xl bg-amber-600/20 hover:bg-amber-600/30 text-amber-300 border border-amber-500/40 text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer shadow-sm"
+                      title="Modyfikuj strategię, dozwolone rynki, profil ryzyka lub wpłać dodatkowy kapitał"
+                    >
+                      <Settings className="w-3.5 h-3.5 text-amber-400" />
+                      <span>Edytuj Strategię</span>
+                    </button>
+                  </div>
                 </div>
 
                 {/* Status Strategii Badge */}
@@ -2404,6 +2455,25 @@ export const TabPortfolios: React.FC<TabPortfoliosProps> = ({
           setToastMessage(`Pomyślnie zaktualizowano strategię portfela "${updated.name}"`);
           setTimeout(() => setToastMessage(null), 4000);
         }}
+      />
+
+      {/* Smart Rebalance Modal */}
+      <SmartRebalanceModal
+        portfolio={currentPortfolio}
+        stockQuotes={stocks}
+        isOpen={isSmartRebalanceModalOpen}
+        onClose={() => setIsSmartRebalanceModalOpen(false)}
+        onRebalanceComplete={(updated) => {
+          onPortfoliosUpdate([...PortfolioService.getPortfolios()]);
+          onTradesUpdate([...PortfolioService.getTrades()]);
+        }}
+      />
+
+      {/* Auto-Pilot Audit Logs Modal */}
+      <AutoPilotLogsModal
+        portfolio={currentPortfolio}
+        isOpen={isAutoPilotLogsModalOpen}
+        onClose={() => setIsAutoPilotLogsModalOpen(false)}
       />
     </div>
   );
