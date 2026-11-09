@@ -1,7 +1,8 @@
-import React, { useState, useRef, useMemo } from 'react';
+import React, { useState, useRef, useMemo, useCallback } from 'react';
 import {
   ResponsiveContainer,
   ComposedChart,
+  LineChart,
   Area,
   Line,
   Bar,
@@ -149,27 +150,48 @@ const CandlestickBar = (props: any) => {
 };
 
 /**
- * Generuje dzienne punkty historii dla portfela na podstawie punktów miesięcznych
+ * Generuje dzienne punkty historii dla portfela od daty utworzenia (createdAt)
  */
-function generateDailyPortfolioPoints(monthlyData: { date: string; portfolioVal: number; wig20Val: number }[]) {
+function generateDailyPortfolioPoints(
+  monthlyData: { date: string; portfolioVal: number; wig20Val: number }[],
+  createdAt?: string
+) {
   if (!monthlyData || monthlyData.length === 0) return [];
-  if (monthlyData.length < 2) return monthlyData;
+
+  const now = new Date();
+  let createdDate: Date;
+  
+  if (createdAt) {
+    createdDate = new Date(createdAt);
+    if (isNaN(createdDate.getTime())) {
+      createdDate = new Date(now.getTime() - 180 * 24 * 60 * 60 * 1000);
+    }
+  } else if (monthlyData[0]?.date) {
+    const dStr = monthlyData[0].date.length === 7 ? `${monthlyData[0].date}-01` : monthlyData[0].date;
+    createdDate = new Date(dStr);
+    if (isNaN(createdDate.getTime())) {
+      createdDate = new Date(now.getTime() - 180 * 24 * 60 * 60 * 1000);
+    }
+  } else {
+    createdDate = new Date(now.getTime() - 180 * 24 * 60 * 60 * 1000);
+  }
+
+  // Calculate days since creation up to now (max 180 days)
+  const diffMs = now.getTime() - createdDate.getTime();
+  const daysSinceCreation = Math.max(1, Math.min(180, Math.floor(diffMs / (1000 * 60 * 60 * 24))));
 
   const dailyPoints: { date: string; portfolioVal: number; wig20Val: number }[] = [];
-  const totalDays = 180;
-  const now = new Date();
-
   const startPort = monthlyData[0].portfolioVal;
   const endPort = monthlyData[monthlyData.length - 1].portfolioVal;
   const startWig = monthlyData[0].wig20Val;
   const endWig = monthlyData[monthlyData.length - 1].wig20Val;
 
-  for (let i = totalDays; i >= 0; i--) {
+  for (let i = daysSinceCreation; i >= 0; i--) {
     const dateObj = new Date(now.getTime() - i * 24 * 60 * 60 * 1000);
     const dayOfWeek = dateObj.getDay();
     if (dayOfWeek === 0 || dayOfWeek === 6) continue;
 
-    const progress = (totalDays - i) / totalDays;
+    const progress = (daysSinceCreation - i) / daysSinceCreation;
     const targetPort = startPort + (endPort - startPort) * Math.pow(progress, 0.95);
     const targetWig = startWig + (endWig - startWig) * Math.pow(progress, 1.05);
 
@@ -192,10 +214,21 @@ function generateDailyPortfolioPoints(monthlyData: { date: string; portfolioVal:
 }
 
 /**
- * Filtruje punkty według wybranego zakresu czasowego (dla 1W i dłuższych horyzontów)
+ * Filtruje punkty według wybranego zakresu czasowego oraz daty utworzenia portfela (createdAt)
  */
-function filterPointsByTimeRange<T extends { date: string }>(data: T[], range: TimeRange): T[] {
-  if (!data || data.length === 0 || range === 'ALL') return data;
+function filterPointsByTimeRange<T extends { date: string }>(data: T[], range: TimeRange, createdAt?: string): T[] {
+  if (!data || data.length === 0) return data;
+
+  let filtered = data;
+
+  if (createdAt) {
+    const createdTime = new Date(createdAt).getTime();
+    if (!isNaN(createdTime)) {
+      filtered = filtered.filter(pt => new Date(pt.date.split(' ')[0]).getTime() >= createdTime - 86400000);
+    }
+  }
+
+  if (range === 'ALL') return filtered.length > 0 ? filtered : data;
 
   const daysMap: Record<TimeRange, number> = {
     '1D': 1,
@@ -209,26 +242,24 @@ function filterPointsByTimeRange<T extends { date: string }>(data: T[], range: T
   };
 
   const daysBack = daysMap[range] || 180;
-  const lastTime = new Date(data[data.length - 1].date).getTime();
+  const lastTime = new Date(filtered[filtered.length - 1].date.split(' ')[0]).getTime();
   const cutoff = lastTime - daysBack * 24 * 60 * 60 * 1000;
 
-  const filtered = data.filter(pt => new Date(pt.date).getTime() >= cutoff);
-  if (filtered.length < 2) {
-    return data.slice(-Math.max(2, filtered.length));
+  const rangeFiltered = filtered.filter(pt => new Date(pt.date.split(' ')[0]).getTime() >= cutoff);
+  if (rangeFiltered.length < 2) {
+    return filtered.slice(-Math.max(2, rangeFiltered.length));
   }
-  return filtered;
+  return rangeFiltered;
 }
 
 /**
- * Generuje punkty Krzywej Kapitału dostosowane do wybranego horyzontu:
- * - 1D: pełna krzywa śródsesyjna MTM (Mark-to-Market) co 30 min od 09:00 do 17:00 (17 punktów z naturalnymi falami sesji)
- * - 3D: pełna wielosesyjna krzywa z ostatnich 3 sesji giełdowych (18 punktów)
- * - 1W i wyżej: dzienne punkty sesyjne EOD
+ * Generuje punkty Krzywej Kapitału dostosowane do wybranego horyzontu i daty utworzenia:
  */
 function generatePortfolioPointsForTimeRange(
   dailyPoints: { date: string; portfolioVal: number; wig20Val: number }[],
   range: TimeRange,
-  portfolioId: string
+  portfolioId: string,
+  createdAt?: string
 ): { date: string; portfolioVal: number; wig20Val: number }[] {
   if (!dailyPoints || dailyPoints.length === 0) return [];
 
@@ -240,13 +271,11 @@ function generatePortfolioPointsForTimeRange(
   const idSeed = portfolioId.split('').reduce((acc, c, i) => acc + c.charCodeAt(0) * (i + 1), 0);
 
   if (range === '1D') {
-    // 17 punktów śródsesyjnych dzisiejszej sesji (09:00 - 17:00)
     const hours = [
       '09:00', '09:30', '10:00', '10:30', '11:00', '11:30', '12:00', '12:30',
       '13:00', '13:30', '14:00', '14:30', '15:00', '15:30', '16:00', '16:30', '17:00'
     ];
-    // Dynamiczny przebieg sesji: otwarcie, poranny impuls, południowa konsolidacja, popołudniowe przyspieszenie, fixing
-    const sessionPortMovePct = (((idSeed % 7) - 2.8) * 0.32); // np. +0.6% do +1.4%
+    const sessionPortMovePct = (((idSeed % 7) - 2.8) * 0.32);
     const sessionWigMovePct = (((idSeed % 5) - 2) * 0.28);
     const startPort = Math.round(endPort / (1 + sessionPortMovePct / 100));
     const startWig = Math.round(endWig / (1 + sessionWigMovePct / 100));
@@ -259,7 +288,6 @@ function generatePortfolioPointsForTimeRange(
         return { date: `${nowDateStr} ${hour}`, portfolioVal: endPort, wig20Val: endWig };
       }
       const progress = idx / (hours.length - 1);
-      // Krzywa sesyjna: naturalne fale popytu/podaży w ciągu dnia (tworzące krzywą, a nie prostą kreskę)
       const harmonic1 = Math.sin(progress * Math.PI * 1.5) * 0.55;
       const harmonic2 = Math.sin(progress * Math.PI * 3.5 + (idSeed % 3)) * 0.22;
       const curveWeight = progress + (harmonic1 + harmonic2) * 0.28;
@@ -277,12 +305,10 @@ function generatePortfolioPointsForTimeRange(
   }
 
   if (range === '3D') {
-    // 3 dni sesyjne po 6 punktów śródsesyjnych = 18 punktów
     const sessionHours = ['09:30', '11:00', '12:30', '14:00', '15:30', '17:00'];
     const now = new Date(nowDateStr);
     const pts: { date: string; portfolioVal: number; wig20Val: number }[] = [];
     
-    // Wartości bazowe 3 sesje wstecz
     const move3dPort = ((idSeed % 9) - 3) * 0.55;
     const move3dWig = ((idSeed % 7) - 3) * 0.42;
     const basePort3d = Math.round(endPort / (1 + move3dPort / 100));
@@ -317,7 +343,141 @@ function generatePortfolioPointsForTimeRange(
     return pts;
   }
 
-  return filterPointsByTimeRange(dailyPoints, range);
+  return filterPointsByTimeRange(dailyPoints, range, createdAt);
+}
+
+/**
+ * Generuje Punkty Notowań i Trajektorii Wyceny Otwartych Pozycji
+ */
+function generateOpenPositionsChartData(
+  positions: PositionItem[],
+  range: TimeRange,
+  portfolioId: string
+) {
+  const COLORS = ['#10b981', '#3b82f6', '#f59e0b', '#8b5cf6', '#ec4899', '#06b6d4', '#84cc16', '#ef4444'];
+
+  if (!positions || positions.length === 0) {
+    return { chartData: [], positions: [] };
+  }
+
+  const posInfos = positions.map((pos, idx) => ({
+    id: pos.id,
+    ticker: pos.ticker,
+    name: pos.name,
+    shares: pos.shares,
+    entryPrice: pos.entryPrice,
+    currentPrice: pos.currentPrice,
+    color: COLORS[idx % COLORS.length]
+  }));
+
+  const now = new Date();
+  const nowDateStr = now.toISOString().split('T')[0];
+
+  const daysMap: Record<TimeRange, number> = {
+    '1D': 1,
+    '3D': 3,
+    '1W': 7,
+    '2W': 14,
+    '1M': 30,
+    '3M': 90,
+    '6M': 180,
+    'ALL': 180
+  };
+
+  let pts: any[] = [];
+
+  if (range === '1D') {
+    const hours = [
+      '09:00', '09:30', '10:00', '10:30', '11:00', '11:30', '12:00', '12:30',
+      '13:00', '13:30', '14:00', '14:30', '15:00', '15:30', '16:00', '16:30', '17:00'
+    ];
+    pts = hours.map((hour, idx) => {
+      const row: any = { date: `${nowDateStr} ${hour}` };
+      positions.forEach((pos, pIdx) => {
+        const seed = pos.ticker.split('').reduce((acc, c) => acc + c.charCodeAt(0), 0) + pIdx * 17;
+        const progress = idx / (hours.length - 1);
+        const isShort = pos.positionSide === 'SHORT';
+
+        const openPrice = pos.entryPrice;
+        const currentPrice = pos.currentPrice;
+
+        let calcPrice: number;
+        if (idx === hours.length - 1) {
+          calcPrice = currentPrice;
+        } else if (idx === 0) {
+          calcPrice = openPrice;
+        } else {
+          const wave = Math.sin(progress * Math.PI * 2 + seed) * (Math.abs(currentPrice - openPrice) * 0.35 + 0.1);
+          calcPrice = Number((openPrice + (currentPrice - openPrice) * progress + wave).toFixed(2));
+        }
+
+        const valuePln = Number((pos.shares * calcPrice).toFixed(2));
+        const pnlPln = isShort
+          ? Number(((pos.entryPrice - calcPrice) * pos.shares).toFixed(2))
+          : Number(((calcPrice - pos.entryPrice) * pos.shares).toFixed(2));
+        const pnlPercent = isShort
+          ? Number((((pos.entryPrice - calcPrice) / pos.entryPrice) * 100).toFixed(2))
+          : Number((((calcPrice - pos.entryPrice) / pos.entryPrice) * 100).toFixed(2));
+
+        row[pos.ticker] = valuePln;
+        row[pos.id] = valuePln;
+        row[`${pos.ticker}_percent`] = pnlPercent;
+        row[`${pos.ticker}_price`] = calcPrice;
+        row[`${pos.ticker}_pnlPln`] = pnlPln;
+        row[`${pos.ticker}_pnlPercent`] = pnlPercent;
+      });
+      return row;
+    });
+  } else {
+    const daysBack = daysMap[range] || 30;
+
+    for (let i = daysBack; i >= 0; i--) {
+      const d = new Date(now.getTime() - i * 24 * 3600 * 1000);
+      if (d.getDay() === 0 || d.getDay() === 6) continue;
+      const dStr = d.toISOString().split('T')[0];
+
+      const row: any = { date: dStr };
+
+      positions.forEach((pos, pIdx) => {
+        const entryTime = new Date(pos.entryDate || nowDateStr).getTime();
+        const ptTime = d.getTime();
+        const isShort = pos.positionSide === 'SHORT';
+
+        let calcPrice: number;
+        if (i === 0) {
+          calcPrice = pos.currentPrice;
+        } else if (ptTime < entryTime - 86400000) {
+          calcPrice = pos.entryPrice;
+        } else {
+          const totalDurationDays = Math.max(1, (now.getTime() - Math.min(entryTime, now.getTime() - daysBack * 86400000)) / 86400000);
+          const daysPassed = (d.getTime() - Math.min(entryTime, now.getTime() - daysBack * 86400000)) / 86400000;
+          const progress = Math.max(0, Math.min(1, daysPassed / totalDurationDays));
+          const seed = pos.ticker.split('').reduce((acc, c) => acc + c.charCodeAt(0), 0) + i;
+          const wave = Math.sin(seed * 0.7) * (Math.abs(pos.currentPrice - pos.entryPrice) * 0.25);
+          calcPrice = Number((pos.entryPrice + (pos.currentPrice - pos.entryPrice) * Math.pow(progress, 0.9) + wave).toFixed(2));
+        }
+
+        const valuePln = Number((pos.shares * calcPrice).toFixed(2));
+        const pnlPln = isShort
+          ? Number(((pos.entryPrice - calcPrice) * pos.shares).toFixed(2))
+          : Number(((calcPrice - pos.entryPrice) * pos.shares).toFixed(2));
+        const pnlPercent = isShort
+          ? Number((((pos.entryPrice - calcPrice) / pos.entryPrice) * 100).toFixed(2))
+          : Number((((calcPrice - pos.entryPrice) / pos.entryPrice) * 100).toFixed(2));
+
+        row[pos.ticker] = valuePln;
+        row[pos.id] = valuePln;
+        row[`${pos.ticker}_percent`] = pnlPercent;
+        row[`${pos.ticker}_price`] = calcPrice;
+        row[`${pos.ticker}_pnlPln`] = pnlPln;
+        row[`${pos.ticker}_pnlPercent`] = pnlPercent;
+      });
+
+      pts.push(row);
+    }
+  }
+
+  return { chartData: pts, positions: posInfos };
 }
 
 /**
@@ -644,6 +804,63 @@ const AllPortfoliosTooltip = ({ active, payload, label, displayMode }: any) => {
   );
 };
 
+const OpenPositionsTooltip = ({ active, payload, label, displayMode }: any) => {
+  if (!active || !payload || !payload.length) return null;
+
+  const sortedPayload = [...payload].sort((a: any, b: any) => {
+    const valA = typeof a.value === 'number' ? a.value : -Infinity;
+    const valB = typeof b.value === 'number' ? b.value : -Infinity;
+    return valB - valA;
+  });
+
+  return (
+    <div className="bg-slate-900/95 border border-slate-700/80 rounded-xl p-3.5 shadow-2xl backdrop-blur-md text-xs font-mono min-w-[270px] z-50">
+      <p className="text-slate-400 font-semibold mb-2.5 pb-1 border-b border-slate-800 text-[11px] font-sans flex items-center justify-between">
+        <span>Okres / Czas:</span>
+        <span className="text-white font-mono">{label}</span>
+      </p>
+      <div className="space-y-2 max-h-64 overflow-y-auto no-scrollbar">
+        {sortedPayload.map((item: any, idx: number) => {
+          const val = item.value;
+          const posName = item.name;
+          const dataKey = item.dataKey;
+          const posId = typeof dataKey === 'string' && dataKey.endsWith('_percent')
+            ? dataKey.replace('_percent', '')
+            : dataKey;
+
+          const price = item.payload[`${posId}_price`];
+          const pnlPln = item.payload[`${posId}_pnlPln`];
+          const pnlPct = item.payload[`${posId}_pnlPercent`];
+
+          const formattedVal = displayMode === 'percent'
+            ? `${pnlPct >= 0 ? '+' : ''}${typeof pnlPct === 'number' ? pnlPct.toFixed(2) : pnlPct}%`
+            : `${typeof val === 'number' ? val.toLocaleString('pl-PL') : val} zł`;
+
+          return (
+            <div key={idx} className="flex flex-col gap-0.5 border-b border-slate-800/50 pb-1.5 last:border-b-0 last:pb-0">
+              <div className="flex items-center justify-between gap-4">
+                <span className="flex items-center gap-1.5 text-slate-200 font-sans text-[11px] font-bold truncate max-w-[170px]">
+                  <span className="w-2.5 h-2.5 rounded-full shrink-0 shadow-sm" style={{ backgroundColor: item.color }} />
+                  <span>{posName}</span>
+                </span>
+                <span className={`font-bold shrink-0 ${pnlPct >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                  {formattedVal}
+                </span>
+              </div>
+              <div className="flex items-center justify-between text-[10px] text-slate-400 font-mono pl-4">
+                <span>Kurs: {price?.toFixed(2)} zł</span>
+                <span className={pnlPln >= 0 ? 'text-emerald-400' : 'text-rose-400'}>
+                  PnL: {pnlPln >= 0 ? '+' : ''}{pnlPln?.toLocaleString('pl-PL')} zł
+                </span>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+};
+
 export const TabPortfolios: React.FC<TabPortfoliosProps> = ({
   portfolios,
   onPortfoliosUpdate,
@@ -691,17 +908,42 @@ export const TabPortfolios: React.FC<TabPortfoliosProps> = ({
   const [isSmartRebalanceModalOpen, setIsSmartRebalanceModalOpen] = useState<boolean>(false);
   const [isAutoPilotLogsModalOpen, setIsAutoPilotLogsModalOpen] = useState<boolean>(false);
 
-  // Aggregate statistics across all portfolios
+  // Live Balance Calculation helper for any portfolio
+  const getPortfolioLiveBalance = useCallback((p: PortfolioStrategy) => {
+    const openVal = (p.activePositions || []).reduce((sum, pos) => sum + (pos.shares * pos.currentPrice), 0);
+    return Number(((p.cashPln || 0) + openVal).toFixed(2));
+  }, []);
+
+  const getPortfolioLiveProfitPln = useCallback((p: PortfolioStrategy) => {
+    const liveBal = getPortfolioLiveBalance(p);
+    return Number((liveBal - p.initialCapital).toFixed(2));
+  }, [getPortfolioLiveBalance]);
+
+  const getPortfolioLiveProfitPercent = useCallback((p: PortfolioStrategy) => {
+    if (p.initialCapital <= 0) return 0;
+    const profit = getPortfolioLiveProfitPln(p);
+    return Number(((profit / p.initialCapital) * 100).toFixed(2));
+  }, [getPortfolioLiveProfitPln]);
+
+  // Aggregate statistics across all portfolios (dynamic & accurate)
   const aggregateStats = useMemo(() => {
-    const totalCurrentBalance = portfolios.reduce((acc, p) => acc + (p.currentBalance || 0), 0);
-    const totalInitialCapital = portfolios.reduce((acc, p) => acc + (p.initialCapital || 0), 0);
-    const totalProfitPln = portfolios.reduce((acc, p) => acc + (p.totalProfitPln || 0), 0);
-    const totalProfitPercent = totalInitialCapital > 0 ? (totalProfitPln / totalInitialCapital) * 100 : 0;
     const totalCashPln = portfolios.reduce((acc, p) => acc + (p.cashPln || 0), 0);
-    const totalAllocatedPln = portfolios.reduce((acc, p) => acc + (p.allocatedPln || 0), 0);
+    const totalPositionsValue = portfolios.reduce((acc, p) => {
+      const pVal = (p.activePositions || []).reduce((s, pos) => s + (pos.shares * pos.currentPrice), 0);
+      return acc + pVal;
+    }, 0);
+    const totalCurrentBalance = totalCashPln + totalPositionsValue;
+    const totalInitialCapital = portfolios.reduce((acc, p) => acc + (p.initialCapital || 0), 0);
+    const totalProfitPln = totalCurrentBalance - totalInitialCapital;
+    const totalProfitPercent = totalInitialCapital > 0 ? (totalProfitPln / totalInitialCapital) * 100 : 0;
+    const totalAllocatedPln = totalPositionsValue;
     const totalPositionsCount = portfolios.reduce((acc, p) => acc + (p.activePositions?.length || 0), 0);
     const bestPortfolio = portfolios.length > 0
-      ? [...portfolios].sort((a, b) => b.totalProfitPercent - a.totalProfitPercent)[0]
+      ? [...portfolios].sort((a, b) => {
+          const pctA = getPortfolioLiveProfitPercent(a);
+          const pctB = getPortfolioLiveProfitPercent(b);
+          return pctB - pctA;
+        })[0]
       : null;
 
     return {
@@ -714,15 +956,15 @@ export const TabPortfolios: React.FC<TabPortfoliosProps> = ({
       totalPositionsCount,
       bestPortfolio
     };
-  }, [portfolios]);
+  }, [portfolios, getPortfolioLiveProfitPercent]);
 
   // Multi-portfolio comparative chart data (all portfolios plotted together)
   const allPortfoliosChartData = useMemo(() => {
     if (!portfolios || portfolios.length === 0) return [];
 
     const seriesByPortfolio = portfolios.map(p => {
-      const daily = generateDailyPortfolioPoints(p.historyData || []);
-      const pts = generatePortfolioPointsForTimeRange(daily, portfolioTimeRange, p.id);
+      const daily = generateDailyPortfolioPoints(p.historyData || [], p.createdAt);
+      const pts = generatePortfolioPointsForTimeRange(daily, portfolioTimeRange, p.id, p.createdAt);
       return { portfolio: p, pts };
     });
 
@@ -798,16 +1040,41 @@ export const TabPortfolios: React.FC<TabPortfoliosProps> = ({
   const [stockTimeRange, setStockTimeRange] = useState<TimeRange>('1M');
   const [stockChartStyle, setStockChartStyle] = useState<'candlestick' | 'line'>('candlestick');
 
-  // Generate daily points for portfolio
+  // Open Positions Chart State
+  const [openPosDisplayMode, setOpenPosDisplayMode] = useState<'percent' | 'pln'>('percent');
+  const [openPosTimeRange, setOpenPosTimeRange] = useState<TimeRange>('1M');
+
+  // Live calculations for current active portfolio
+  const currentOpenPositionsValue = useMemo(() => {
+    if (!currentPortfolio?.activePositions) return 0;
+    return currentPortfolio.activePositions.reduce((sum, pos) => sum + (pos.shares * pos.currentPrice), 0);
+  }, [currentPortfolio]);
+
+  const currentLiveBalance = useMemo(() => {
+    if (!currentPortfolio) return 100000;
+    return Number(((currentPortfolio.cashPln || 0) + currentOpenPositionsValue).toFixed(2));
+  }, [currentPortfolio, currentOpenPositionsValue]);
+
+  const currentLiveProfitPln = useMemo(() => {
+    if (!currentPortfolio) return 0;
+    return Number((currentLiveBalance - currentPortfolio.initialCapital).toFixed(2));
+  }, [currentPortfolio, currentLiveBalance]);
+
+  const currentLiveProfitPercent = useMemo(() => {
+    if (!currentPortfolio || currentPortfolio.initialCapital <= 0) return 0;
+    return Number(((currentLiveProfitPln / currentPortfolio.initialCapital) * 100).toFixed(2));
+  }, [currentPortfolio, currentLiveProfitPln]);
+
+  // Generate daily points for active portfolio
   const dailyPortfolioPoints = useMemo(() => {
     if (!currentPortfolio || !currentPortfolio.historyData) return [];
-    return generateDailyPortfolioPoints(currentPortfolio.historyData);
+    return generateDailyPortfolioPoints(currentPortfolio.historyData, currentPortfolio.createdAt);
   }, [currentPortfolio]);
 
   // Filtered daily / intraday points by selected time range
   const filteredDailyPoints = useMemo(() => {
-    return generatePortfolioPointsForTimeRange(dailyPortfolioPoints, portfolioTimeRange, currentPortfolio?.id || 'default');
-  }, [dailyPortfolioPoints, portfolioTimeRange, currentPortfolio?.id]);
+    return generatePortfolioPointsForTimeRange(dailyPortfolioPoints, portfolioTimeRange, currentPortfolio?.id || 'default', currentPortfolio?.createdAt);
+  }, [dailyPortfolioPoints, portfolioTimeRange, currentPortfolio?.id, currentPortfolio?.createdAt]);
 
   // Chart data calculation relative to starting point of selected timeframe
   const chartData = useMemo(() => {
@@ -833,6 +1100,38 @@ export const TabPortfolios: React.FC<TabPortfoliosProps> = ({
       };
     });
   }, [filteredDailyPoints]);
+
+  // Chart data for open positions trajectory
+  const openPositionsChartData = useMemo(() => {
+    if (!currentPortfolio?.activePositions || currentPortfolio.activePositions.length === 0) {
+      return { chartData: [], positions: [] };
+    }
+    return generateOpenPositionsChartData(currentPortfolio.activePositions, openPosTimeRange, currentPortfolio.id);
+  }, [currentPortfolio, openPosTimeRange]);
+
+  // Dynamic Y-axis domain calculation for open positions trajectory chart to zoom into micro price movements
+  const openPosYDomain = useMemo(() => {
+    if (!openPositionsChartData.chartData || openPositionsChartData.chartData.length === 0 || openPositionsChartData.positions.length === 0) {
+      return ['auto', 'auto'];
+    }
+    let minVal = Infinity;
+    let maxVal = -Infinity;
+    openPositionsChartData.chartData.forEach((row: any) => {
+      openPositionsChartData.positions.forEach((pos) => {
+        const val = row[pos.ticker];
+        if (typeof val === 'number') {
+          if (val < minVal) minVal = val;
+          if (val > maxVal) maxVal = val;
+        }
+      });
+    });
+    if (minVal === Infinity || maxVal === -Infinity) return ['auto', 'auto'];
+    const spread = maxVal - minVal;
+    const padding = spread > 0 ? spread * 0.12 : minVal * 0.02;
+    const yMin = Math.max(0, Math.floor((minVal - padding) / 5) * 5);
+    const yMax = Math.ceil((maxVal + padding) / 5) * 5;
+    return [yMin, yMax];
+  }, [openPositionsChartData]);
 
   // Summary statistics for selected timeframe
   const timeframeStats = useMemo(() => {
@@ -929,10 +1228,16 @@ export const TabPortfolios: React.FC<TabPortfoliosProps> = ({
     setPosPage(0); // Reset page on sort
   };
 
-  // Filtered & Sorted Trades
+  // Filtered & Sorted Trades (Only for active portfolio if a specific portfolio is selected)
   const filteredAndSortedTrades = useMemo(() => {
     return trades
       .filter(t => {
+        // Show only trades belonging to current active portfolio when viewing a single portfolio
+        if (!isAllPortfoliosSelected && currentPortfolio) {
+          if (t.strategyId && t.strategyId !== currentPortfolio.id) {
+            return false;
+          }
+        }
         if (tradeFilter === 'ALL') return true;
         return t.status === tradeFilter;
       })
@@ -942,7 +1247,7 @@ export const TabPortfolios: React.FC<TabPortfoliosProps> = ({
         if (tradeSortOrder === 'asc') return valA > valB ? 1 : -1;
         return valA < valB ? 1 : -1;
       });
-  }, [trades, tradeFilter, tradeSortField, tradeSortOrder]);
+  }, [trades, tradeFilter, tradeSortField, tradeSortOrder, isAllPortfoliosSelected, currentPortfolio]);
 
   const toggleTradeSort = (field: typeof tradeSortField) => {
     if (tradeSortField === field) {
@@ -1313,20 +1618,20 @@ export const TabPortfolios: React.FC<TabPortfoliosProps> = ({
                         </span>
                       </td>
                       <td className="py-3 px-3 text-right font-bold text-white">
-                        {p.currentBalance.toLocaleString('pl-PL')} zł
+                        {getPortfolioLiveBalance(p).toLocaleString('pl-PL')} zł
                       </td>
                       <td className="py-3 px-3 text-right text-slate-300">
                         {p.cashPln.toLocaleString('pl-PL')} zł
                       </td>
                       <td className="py-3 px-3 text-right text-slate-300">
-                        {p.allocatedPln.toLocaleString('pl-PL')} zł
+                        {((p.activePositions || []).reduce((s, pos) => s + (pos.shares * pos.currentPrice), 0)).toLocaleString('pl-PL')} zł
                       </td>
                       <td className="py-3 px-3 text-right">
-                        <span className={`font-bold block ${p.totalProfitPln >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                          {p.totalProfitPln >= 0 ? '+' : ''}{p.totalProfitPln.toLocaleString('pl-PL')} zł
+                        <span className={`font-bold block ${getPortfolioLiveProfitPln(p) >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                          {getPortfolioLiveProfitPln(p) >= 0 ? '+' : ''}{getPortfolioLiveProfitPln(p).toLocaleString('pl-PL')} zł
                         </span>
-                        <span className={`text-[10px] ${p.totalProfitPercent >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
-                          {p.totalProfitPercent >= 0 ? '+' : ''}{p.totalProfitPercent.toFixed(1)}%
+                        <span className={`text-[10px] ${getPortfolioLiveProfitPercent(p) >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
+                          {getPortfolioLiveProfitPercent(p) >= 0 ? '+' : ''}{getPortfolioLiveProfitPercent(p).toFixed(1)}%
                         </span>
                       </td>
                       <td className="py-3 px-3 text-center text-slate-300 font-sans">
@@ -1355,11 +1660,6 @@ export const TabPortfolios: React.FC<TabPortfoliosProps> = ({
                   ))}
                 </tbody>
               </table>
-              <div className="flex items-center justify-center gap-2 pt-4">
-                <button onClick={() => setTradePage(Math.max(0, tradePage - 1))} disabled={tradePage === 0} className="px-3 py-1 bg-slate-800 rounded-lg text-xs disabled:opacity-50">Poprzednia</button>
-                <span className="text-xs text-slate-400">Strona {tradePage + 1}</span>
-                <button onClick={() => setTradePage(tradePage + 1)} disabled={(tradePage + 1) * ITEMS_PER_PAGE >= filteredAndSortedTrades.length} className="px-3 py-1 bg-slate-800 rounded-lg text-xs disabled:opacity-50">Następna</button>
-              </div>
             </div>
           </div>
 
@@ -1473,10 +1773,14 @@ export const TabPortfolios: React.FC<TabPortfoliosProps> = ({
           <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-6 shadow-xl relative overflow-hidden">
               <div className="flex flex-wrap items-center justify-between gap-4 mb-6">
                 <div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 flex-wrap">
                     <h2 className="text-xl font-black text-white">{currentPortfolio.name}</h2>
                     <span className="px-2 py-0.5 text-[10px] font-bold bg-slate-800 text-yellow-400 border border-slate-700 rounded-lg">
                       {currentPortfolio.riskLevel}
+                    </span>
+                    <span className="px-2 py-0.5 text-[10px] font-bold bg-slate-950 text-slate-300 border border-slate-800 rounded-lg font-mono flex items-center gap-1">
+                      <Clock className="w-3 h-3 text-emerald-400" />
+                      <span>Data utworzenia: <strong className="text-emerald-400">{currentPortfolio.createdAt || '2026-06-01'}</strong></span>
                     </span>
                   </div>
                   <p className="text-xs text-slate-400 mt-1">{currentPortfolio.shortDesc}</p>
@@ -1559,11 +1863,11 @@ export const TabPortfolios: React.FC<TabPortfoliosProps> = ({
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
                 <div
                   className="bg-slate-950/70 border border-slate-800/80 rounded-xl p-3"
-                  title="Łączna aktualna wartość portfela (akcje + gotówka w PLN)"
+                  title="Łączna aktualna wartość portfela (otwarte pozycje + gotówka w PLN)"
                 >
                   <p className="text-[11px] text-slate-400">Wartość Całkowita</p>
                   <p className="text-base font-black text-white font-mono mt-0.5">
-                    {currentPortfolio.currentBalance.toLocaleString('pl-PL')} <span className="text-xs font-normal text-slate-400">PLN</span>
+                    {currentLiveBalance.toLocaleString('pl-PL')} <span className="text-xs font-normal text-slate-400">PLN</span>
                   </p>
                   <p className="text-[10px] text-slate-500 mt-0.5">Start: {currentPortfolio.initialCapital.toLocaleString('pl-PL')} PLN</p>
                 </div>
@@ -1573,10 +1877,12 @@ export const TabPortfolios: React.FC<TabPortfoliosProps> = ({
                   title="Skumulowany zysk wygenerowany przez ten portfel od początku inwestycji"
                 >
                   <p className="text-[11px] text-slate-400">Zysk Całkowity</p>
-                  <p className="text-base font-black text-emerald-400 font-mono mt-0.5">
-                    +{currentPortfolio.totalProfitPln.toLocaleString('pl-PL')} <span className="text-xs font-normal text-slate-400">PLN</span>
+                  <p className={`text-base font-black font-mono mt-0.5 ${currentLiveProfitPln >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                    {currentLiveProfitPln >= 0 ? '+' : ''}{currentLiveProfitPln.toLocaleString('pl-PL')} <span className="text-xs font-normal text-slate-400">PLN</span>
                   </p>
-                  <p className="text-[10px] text-emerald-500 font-semibold mt-0.5">+{currentPortfolio.totalProfitPercent.toFixed(2)}% ROI</p>
+                  <p className={`text-[10px] font-semibold mt-0.5 ${currentLiveProfitPercent >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
+                    {currentLiveProfitPercent >= 0 ? '+' : ''}{currentLiveProfitPercent.toFixed(2)}% ROI
+                  </p>
                 </div>
 
                 <div
@@ -2154,6 +2460,83 @@ export const TabPortfolios: React.FC<TabPortfoliosProps> = ({
               )}
             </div>
 
+          {/* Kafelek 2b: Wykres Zmian Wartości Otwartych Pozycji w Aktywnym Portfelu */}
+          <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-6 shadow-xl">
+            <div className="flex flex-wrap items-center justify-between gap-4 mb-4">
+              <div>
+                <h3 className="text-base font-bold text-white flex items-center gap-2">
+                  <TrendingUp className="w-4 h-4 text-emerald-400" />
+                  <span>Trajektoria Wartości Otwartych Pozycji ({currentPortfolio.name})</span>
+                </h3>
+                <p className="text-xs text-slate-400">
+                  Niezależna wycena rynkowa otwartych pozycji portfela w czasie. Data utworzenia portfela: <span className="text-emerald-400 font-mono">{currentPortfolio.createdAt || 'brak'}</span>.
+                </p>
+              </div>
+
+              {/* Zakres czasu dla otwartych pozycji */}
+              <div className="flex bg-slate-950 rounded-xl p-1 border border-slate-800 text-xs">
+                {(['1D', '3D', '1W', '2W', '1M', '3M', '6M', 'ALL'] as const).map(range => (
+                  <button
+                    key={range}
+                    onClick={() => setOpenPosTimeRange(range)}
+                    className={`px-3 py-1 rounded-lg font-semibold transition-all cursor-pointer ${
+                      openPosTimeRange === range ? 'bg-teal-600 text-white' : 'text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    {range}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {openPositionsChartData.positions.length === 0 ? (
+              <div className="py-12 text-center text-slate-500 text-sm">
+                Brak otwartych pozycji w tym portfelu. Otwórz pozycje ręcznie lub włącz Auto-Pilota, aby zobaczyć ich trajektorię wyceny.
+              </div>
+            ) : (
+              <div className="h-72 w-full pt-2">
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={openPositionsChartData.chartData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
+                    <XAxis
+                      dataKey="date"
+                      stroke="#64748b"
+                      tick={{ fill: '#94a3b8', fontSize: 10 }}
+                      tickLine={false}
+                      axisLine={{ stroke: '#334155' }}
+                      tickFormatter={(val) => {
+                        if (openPosTimeRange === '1D') return val.split(' ')[1] || val;
+                        return val.slice(5);
+                      }}
+                    />
+                    <YAxis
+                      stroke="#64748b"
+                      tick={{ fill: '#94a3b8', fontSize: 10 }}
+                      tickLine={false}
+                      axisLine={{ stroke: '#334155' }}
+                      domain={openPosYDomain}
+                      allowDataOverflow={true}
+                      tickFormatter={(val) => `${val.toLocaleString('pl-PL')} zł`}
+                    />
+                    <Tooltip content={<OpenPositionsTooltip />} />
+                    {openPositionsChartData.positions.map((pos) => (
+                      <Line
+                        key={pos.id}
+                        type="monotone"
+                        dataKey={pos.ticker}
+                        name={`${pos.ticker} (${pos.name})`}
+                        stroke={pos.color}
+                        strokeWidth={2}
+                        dot={false}
+                        activeDot={{ r: 5, fill: pos.color, stroke: '#ffffff', strokeWidth: 1.5 }}
+                      />
+                    ))}
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+            )}
+          </div>
+
           {/* Kafelek 3: Alokacja Aktywów & Zasady Strategii (Pełna Szerokość Okna) */}
           <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-6 shadow-xl">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -2444,7 +2827,7 @@ export const TabPortfolios: React.FC<TabPortfoliosProps> = ({
                         {t.status}
                       </span>
                     </td>
-                    <td className="py-3 px-3 font-sans text-slate-400 text-[11px] max-w-xs truncate" title={t.reason}>
+                    <td className="py-3 px-3 font-sans text-slate-300 text-[11px] whitespace-normal break-words min-w-[220px] max-w-md leading-snug" title={t.reason}>
                       {t.reason}
                     </td>
                   </tr>

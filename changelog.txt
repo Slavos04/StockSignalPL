@@ -1,4 +1,23 @@
 ================================================================================
+Wersja 2.4.3 (2026-11-09) - Data Utworzenia Portfela, Wykres Otwartych Pozycji & Ścisła Spójność Wartości Portfela
+================================================================================
+1. DATA UTWORZENIA PORTFELA (createdAt):
+   - Wprowadzono znacznik daty utworzenia portfela w strukturze danych (`PortfolioStrategy.createdAt`).
+   - Przypisano daty utworzenia dla istniejących oraz nowo dodawanych portfeli.
+   - Wszystkie wykresy historii i ROI uwzględniają datę powstania portfela (brak halucynacji wyników sprzed utworzenia).
+
+2. FILTROWANIE DZIENNIKA TRADERA PER PORTFEL:
+   - Dziennik Tradera GPW prezentuje transakcje wyłącznie dla aktualnie aktywnego portfela (gdy wybrany jest pojedynczy portfel).
+   - Kolumna "Uzasadnienie / Źródło" zawija tekst w wielu wierszach z zachowaniem czytelności i odstępów.
+
+3. KAFELEK TRAJEKTORII WARTOŚCI OTWARTYCH POZYCJI:
+   - Dodano dedykowany wykres liniowy dla otwartych pozycji z filtrami czasowymi (1D, 3D, 1W, 2W, 1M, 3M, 6M, ALL).
+   - Czytelny tooltip prezentuje nazwę waloru, wolumen, aktualny kurs i rynkową wartość pozycji.
+
+4. MATEMATYCZNA SPÓJNOŚĆ WARTOŚCI CAŁKOWITEJ PORTFELA:
+   - Wyeliminowano rozbieżność między "Wartością Całkowitą" a sumą "Otwarte Pozycje + Gotówka" poprzez dynamiczne przeliczanie bilansu na żywo z aktualnych kursów rynkowych.
+
+================================================================================
 Wersja 2.4.2 (2026-11-09) - Paginacja Dziennika Tradera
 ================================================================================
 1. PAGINACJA W TABELACH PORTFELI:

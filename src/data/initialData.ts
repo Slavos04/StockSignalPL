@@ -1350,6 +1350,7 @@ export const INITIAL_PORTFOLIOS: PortfolioStrategy[] = [
     winRate: 81.25,
     autoPilotEnabled: true,
     telegramEnabled: true,
+    createdAt: '2026-06-01',
     activePositions: [
       {
         id: 'pos_pkn',
@@ -1437,6 +1438,7 @@ export const INITIAL_PORTFOLIOS: PortfolioStrategy[] = [
     winRate: 77.78,
     autoPilotEnabled: true,
     telegramEnabled: true,
+    createdAt: '2026-06-15',
     activePositions: [
       {
         id: 'pos_ccc',
@@ -1505,6 +1507,7 @@ export const INITIAL_PORTFOLIOS: PortfolioStrategy[] = [
     winRate: 71.43,
     autoPilotEnabled: true,
     telegramEnabled: true,
+    createdAt: '2026-07-01',
     activePositions: [
       {
         id: 'pos_mls',
@@ -1573,6 +1576,7 @@ export const INITIAL_PORTFOLIOS: PortfolioStrategy[] = [
     winRate: 86.36,
     autoPilotEnabled: false,
     telegramEnabled: true,
+    createdAt: '2026-07-15',
     activePositions: [
       {
         id: 'pos_xtb',
@@ -1641,6 +1645,7 @@ export const INITIAL_PORTFOLIOS: PortfolioStrategy[] = [
     winRate: 85.19,
     autoPilotEnabled: true,
     telegramEnabled: true,
+    createdAt: '2026-08-01',
     activePositions: [
       {
         id: 'pos_fw20',
@@ -1690,6 +1695,7 @@ export const INITIAL_PORTFOLIOS: PortfolioStrategy[] = [
     winRate: 83.33,
     autoPilotEnabled: true,
     telegramEnabled: true,
+    createdAt: '2026-08-15',
     activePositions: [
       {
         id: 'pos_xau',

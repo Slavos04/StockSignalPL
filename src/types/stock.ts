@@ -200,6 +200,7 @@ export interface PortfolioStrategy {
   autoCutWeakConsensus?: boolean;      // Automatyczne zamykanie pozycji gdy Konsensus < 45%
   autoPilotLogs?: AutoPilotLogItem[];  // Dziennik audytowy decyzji bota
 
+  createdAt?: string;
   activePositions: PositionItem[];
   historyData: { date: string; portfolioVal: number; wig20Val: number }[];
 }

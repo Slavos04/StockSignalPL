@@ -189,6 +189,7 @@ export class PortfolioService {
       winRate: 100,
       autoPilotEnabled,
       telegramEnabled,
+      createdAt: new Date().toISOString().split('T')[0],
       activePositions: [],
       historyData: [
         { date: '2026-06', portfolioVal: initialCapital, wig20Val: 100000 },
@@ -669,16 +670,17 @@ export class PortfolioService {
       p.activePositions.forEach(pos => {
         const quote = stockQuotes.find(q => q.symbol === pos.ticker || q.cleanSymbol === pos.ticker);
         if (quote) {
+          // Zawsze aktualizuj bieżący kurs rynkowy i wynik PnL na żywo z ostatniego ticka
+          pos.currentPrice = quote.price;
+          pos.pnlPln = Number(((pos.currentPrice - pos.entryPrice) * pos.shares).toFixed(2));
+          pos.pnlPercent = Number((((pos.currentPrice - pos.entryPrice) / pos.entryPrice) * 100).toFixed(2));
+
           // Na zamkniętym rynku brak realizacji automatycznych zleceń TP/SL
           const marketCheck = MarketSessionService.isMarketOpenForStock(quote, new Date(), forceTest);
           if (!marketCheck.isOpen) {
             remainingPositions.push(pos);
             return;
           }
-
-          pos.currentPrice = quote.price;
-          pos.pnlPln = Number(((pos.currentPrice - pos.entryPrice) * pos.shares).toFixed(2));
-          pos.pnlPercent = Number((((pos.currentPrice - pos.entryPrice) / pos.entryPrice) * 100).toFixed(2));
 
           const timestamp = new Date().toLocaleString('pl-PL', { dateStyle: 'short', timeStyle: 'medium' });
 
