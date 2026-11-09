@@ -59,6 +59,45 @@ export const TabAdminSettings: React.FC<TabAdminSettingsProps> = ({
   const [isFetchingApi, setIsFetchingApi] = useState(false);
   const [isFetchingHistorical, setIsFetchingHistorical] = useState(false);
 
+  // Server AutoPilot Daemon interval state (Tylko Administrator)
+  const [daemonIntervalMs, setDaemonIntervalMs] = useState<number>(15000);
+  const [isSavingDaemonInterval, setIsSavingDaemonInterval] = useState<boolean>(false);
+  const [daemonMessage, setDaemonMessage] = useState<string | null>(null);
+
+  // Fetch daemon status on load
+  React.useEffect(() => {
+    fetch('/api/admin/daemon-settings')
+      .then(res => res.json())
+      .then(data => {
+        if (data.success && data.intervalMs) {
+          setDaemonIntervalMs(data.intervalMs);
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  const handleUpdateDaemonInterval = async (newMs: number) => {
+    setIsSavingDaemonInterval(true);
+    setDaemonIntervalMs(newMs);
+    try {
+      const res = await fetch('/api/admin/daemon-settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ intervalMs: newMs })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setDaemonMessage(data.message || 'Pomyślnie zaktualizowano interwał silnika serwera.');
+        setTimeout(() => setDaemonMessage(null), 4000);
+      }
+    } catch {
+      setDaemonMessage('Błąd podczas zapisywania interwału silnika serwera.');
+      setTimeout(() => setDaemonMessage(null), 4000);
+    } finally {
+      setIsSavingDaemonInterval(false);
+    }
+  };
+
   // Single report form state
   const [newBroker, setNewBroker] = useState('Telegram: GPW Signals');
   const [newTicker, setNewTicker] = useState('CDR.PL');
@@ -616,6 +655,98 @@ XAU KUPUJ Cena: 16133.00 Target: 18500.00`
               <p className="text-xs text-slate-300 mt-1">
                 Pobrane rekomendacje natychmiast trafiają do <strong className="text-emerald-400">Etap 1: Audyt Trafności</strong> dla wszystkich inwestorów.
               </p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Admin Panel: Serwerowy Silnik Auto-Pilota 24/7 (Częstotliwość Pracy) */}
+      {isAdmin && (
+        <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-800 pb-4">
+            <div>
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-lg bg-cyan-600/20 text-cyan-400 border border-cyan-500/30 flex items-center justify-center">
+                  <Sliders className="w-4 h-4" />
+                </div>
+                <h3 className="text-lg font-black text-white">Silnik Serwerowy Auto-Pilota 24/7 (Częstotliwość Pracy Bota)</h3>
+              </div>
+              <p className="text-xs text-slate-400 mt-1">
+                Ustal jak często autonomiczny demon serwerowy sprawdza kursy rynkowe, weryfikuje zlecenia TP1/TP2/TP3/SL oraz wyszukuje nowe okazje dla włączonych portfeli bez obecności użytkownika.
+              </p>
+            </div>
+
+            {daemonMessage && (
+              <div className="px-3 py-1.5 rounded-xl bg-emerald-950/80 border border-emerald-500/60 text-emerald-200 text-xs flex items-center gap-1.5 animate-fade-in font-medium">
+                <CheckCircle className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                <span>{daemonMessage}</span>
+              </div>
+            )}
+          </div>
+
+          <div className="space-y-3">
+            <div className="flex items-center justify-between text-xs">
+              <span className="text-slate-300 font-semibold flex items-center gap-2">
+                <span>Interwał sprawdzania rynku i egzekucji w tle:</span>
+                <span className="font-mono text-cyan-400 font-bold px-2 py-0.5 rounded bg-cyan-950/60 border border-cyan-800/60">
+                  {(() => {
+                    const sec = daemonIntervalMs / 1000;
+                    if (sec < 60) return `${sec} sekund`;
+                    if (sec < 3600) return `${sec / 60} minut`;
+                    return `${sec / 3600} godzin`;
+                  })()}
+                </span>
+              </span>
+              <span className="text-[11px] text-slate-400">
+                {isSavingDaemonInterval ? 'Zapisywanie na serwerze...' : 'Kliknij interwał, aby natychmiast przestawić silnik'}
+              </span>
+            </div>
+
+            {/* Grid przycisków interwałów */}
+            <div className="grid grid-cols-3 sm:grid-cols-5 md:grid-cols-7 lg:grid-cols-14 gap-1.5">
+              {[
+                { label: '15s', ms: 15000, desc: '15 sekund (szybki)' },
+                { label: '30s', ms: 30000, desc: '30 sekund' },
+                { label: '1m', ms: 60000, desc: '1 minuta' },
+                { label: '2m', ms: 120000, desc: '2 minuty' },
+                { label: '3m', ms: 180000, desc: '3 minuty' },
+                { label: '5m', ms: 300000, desc: '5 minut' },
+                { label: '10m', ms: 600000, desc: '10 minut' },
+                { label: '15m', ms: 900000, desc: '15 minut' },
+                { label: '30m', ms: 1800000, desc: '30 minut' },
+                { label: '45m', ms: 2700000, desc: '45 minut' },
+                { label: '1g', ms: 3600000, desc: '1 godzina' },
+                { label: '2g', ms: 7200000, desc: '2 godziny' },
+                { label: '3g', ms: 10800000, desc: '3 godziny' },
+                { label: '4g', ms: 14400000, desc: '4 godziny' },
+              ].map((item) => {
+                const isSelected = daemonIntervalMs === item.ms;
+                return (
+                  <button
+                    key={item.label}
+                    onClick={() => handleUpdateDaemonInterval(item.ms)}
+                    disabled={isSavingDaemonInterval}
+                    title={`Ustaw interwał sprawdzania zleceń w tle na ${item.desc}`}
+                    className={`py-2 px-1 rounded-xl text-center font-bold text-xs transition-all border cursor-pointer ${
+                      isSelected
+                        ? 'bg-gradient-to-b from-cyan-600 to-teal-600 text-white border-cyan-400 shadow-lg shadow-cyan-950/50 ring-1 ring-cyan-400'
+                        : 'bg-slate-950/70 border-slate-800 text-slate-300 hover:text-white hover:bg-slate-800/60'
+                    }`}
+                  >
+                    <div className="text-xs font-mono">{item.label}</div>
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className="p-3 bg-slate-950/60 rounded-xl border border-slate-800/80 flex flex-wrap items-center justify-between text-xs text-slate-400 gap-2">
+              <div className="flex items-center gap-2">
+                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                <span>Status Silnika: <strong className="text-emerald-400">AKTYWNY 24/7</strong> (Działa w procesie Node.js w tle serwera)</span>
+              </div>
+              <div className="text-[11px] text-slate-400">
+                Wpływ: częstsze cykle (30s, 1m) to szybsza reakcja na TP/SL; dłuższe cykle (30m, 1g+) to mniejsze zużycie zapytań do feedu notowań.
+              </div>
             </div>
           </div>
         </div>

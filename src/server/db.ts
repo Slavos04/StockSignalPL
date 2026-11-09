@@ -392,3 +392,66 @@ export async function dbSaveTrade(userId: string, t: any): Promise<void> {
   list.unshift({ ...t });
   memoryTrades.set(userId, list.slice(0, 200));
 }
+
+export async function dbGetAllPortfoliosWithUsers(): Promise<{ userId: string; portfolio: any }[]> {
+  const result: { userId: string; portfolio: any }[] = [];
+
+  if (isPostgresConnected && pool) {
+    try {
+      const res = await pool.query(`SELECT * FROM portfolios WHERE autopilot_enabled = true`);
+      res.rows.forEach(r => {
+        result.push({
+          userId: r.user_id,
+          portfolio: {
+            id: r.id,
+            userId: r.user_id,
+            name: r.name,
+            shortDesc: r.short_desc,
+            riskLevel: r.risk_level,
+            initialCapital: Number(r.initial_capital),
+            currentBalance: Number(r.current_balance),
+            allocatedPln: Number(r.allocated_pln),
+            cashPln: Number(r.cash_pln),
+            totalProfitPln: Number(r.total_profit_pln),
+            totalProfitPercent: Number(r.total_profit_percent),
+            benchmarkReturnWig20: Number(r.benchmark_return_wig20),
+            alpha: Number(r.alpha),
+            tradesCount: r.trades_count,
+            winRate: Number(r.win_rate),
+            autoPilotEnabled: r.autopilot_enabled,
+            telegramEnabled: r.telegram_enabled,
+            isCustom: r.is_custom,
+            activePositions: r.active_positions || [],
+            historyData: r.history_data || []
+          }
+        });
+      });
+      return result;
+    } catch (e) {
+      console.error('[PostgreSQL] dbGetAllPortfoliosWithUsers error:', e);
+    }
+  }
+
+  // Memory fallback
+  for (const [userId, ports] of memoryPortfolios.entries()) {
+    ports.forEach(p => {
+      if (p.autoPilotEnabled) {
+        result.push({ userId, portfolio: p });
+      }
+    });
+  }
+
+  return result;
+}
+
+export async function dbGetSettings(userId: string): Promise<any | null> {
+  if (isPostgresConnected && pool) {
+    try {
+      const res = await pool.query(`SELECT * FROM settings WHERE user_id = $1 LIMIT 1`, [userId]);
+      if (res.rows.length > 0) return res.rows[0];
+    } catch (e) {
+      console.error('[PostgreSQL] dbGetSettings error:', e);
+    }
+  }
+  return memorySettings.get(userId) || null;
+}

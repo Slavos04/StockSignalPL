@@ -12,6 +12,7 @@ import {
   dbGetTrades,
   dbSaveTrade
 } from './src/server/db';
+import { ServerAutoPilotDaemon } from './src/server/serverAutoPilotDaemon';
 
 async function startServer() {
   const app = express();
@@ -810,6 +811,39 @@ async function startServer() {
   });
 
   // ==========================================
+  // 5.5 SERVER AUTOPILOT DAEMON ADMIN API
+  // ==========================================
+  app.get('/api/admin/daemon-settings', (req: Request, res: Response) => {
+    try {
+      const status = ServerAutoPilotDaemon.getStatus();
+      return res.json({
+        success: true,
+        ...status
+      });
+    } catch (err: any) {
+      return res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  app.post('/api/admin/daemon-settings', (req: Request, res: Response) => {
+    try {
+      const { intervalMs } = req.body;
+      const parsedInterval = parseInt(intervalMs, 10);
+      if (isNaN(parsedInterval) || parsedInterval < 1000) {
+        return res.status(400).json({ success: false, error: 'Nieprawidłowy interwał silnika.' });
+      }
+      ServerAutoPilotDaemon.setIntervalMs(parsedInterval);
+      return res.json({
+        success: true,
+        message: `Pomyślnie zaktualizowano interwał silnika serwera na ${parsedInterval / 1000}s.`,
+        ...ServerAutoPilotDaemon.getStatus()
+      });
+    } catch (err: any) {
+      return res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // ==========================================
   // 6. SPA / VITE MIDDLEWARE
   // ==========================================
   if (isProduction) {
@@ -828,6 +862,8 @@ async function startServer() {
 
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`[StockSignalPl] Server running on http://0.0.0.0:${PORT} (PostgreSQL mode)`);
+    // Start autonomous server-side Auto-Pilot daemon (24/7 autonomous order execution)
+    ServerAutoPilotDaemon.start(15000);
   });
 }
 

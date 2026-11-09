@@ -384,7 +384,7 @@ export const Navbar: React.FC<NavbarProps> = ({
             {/* Info Icon Button (i) */}
             <button
               onClick={onOpenInfoModal}
-              title="Informacje o programie StockSignalPL, numer wersji (v2.2) oraz pełny Changelog"
+              title="Informacje o programie StockSignalPL, numer wersji (v2.4) oraz pełny Changelog"
               className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 transition-colors cursor-pointer"
             >
               <Info className="w-4 h-4 text-sky-400" />

@@ -16,6 +16,35 @@ CHANGELOG - HISTORIA ZMIAN I WERSJI STOCKSIGNALPL
 ================================================================================
 
 ================================================================================
+Wersja 2.4 (2026-11-09) - Panel Częstotliwości Silnika Auto-Pilota 24/7 w Panelu Admina (15s do 4g) & Przygotowanie Wydania
+================================================================================
+1. ZARZĄDZANIE CZĘSTOTLIWOŚCIĄ PRACY SILNIKA SERWEROWEGO 24/7 W PANELU ADMINA:
+   - Dodano interaktywny panel wyboru interwału egzekucji dla demona serwerowego w zakładce Admin.
+   - Pełna paleta 14 interwałów czasowych: 15s (szybki), 30s, 1m, 2m, 3m, 5m, 10m, 15m, 30m, 45m, 1g, 2g, 3g, 4g.
+   - Płynne przestawianie pętli demona w locie na serwerze przez API (/api/admin/daemon-settings) bez przerywania pracy systemu.
+   - Dynamiczny podgląd statusu bota oraz informacja o wpływie częstotliwości na zapytania do feedów notowań.
+
+================================================================================
+Wersja 2.3 (2026-11-09) - Autonomiczny Serwerowy Silnik Egzekucji Auto-Pilota 24/7 (Headless Server Daemon) & Ciągła Realizacja Zleceń w Tle bez Logowania
+================================================================================
+1. AUTONOMICZNY SILNIK SERWEROWY AUTO-PILOTA 24/7 (SERVER AUTO-PILOT DAEMON):
+   - Wdrożono w pełni autonomiczny serwerowy proces w tle w środowisku Node.js (ServerAutoPilotDaemon).
+   - Silnik działa 24 godziny na dobę bezpośrednio na serwerze i nie wymaga otwartej przeglądarki ani zalogowanego użytkownika.
+   - Pętla egzekucyjna weryfikuje rynek w regularnych cyklach (co 15 sekund) w oparciu o autentyczne kursy transakcyjne na żywo (GPW, FW20, Surowce NBP/COMEX).
+   - Odpytuje bazę danych PostgreSQL o wszystkie skonfigurowane portfele z aktywnym przełącznikiem Auto-Pilota (autoPilotEnabled = true).
+
+2. PEŁNA REALIZACJA ZLECEŃ TP / SL PO WYLOGOWANIU UŻYTKOWNIKA:
+   - Pozycje otwarte przez inwestora lub bota są monitorowane i zamykane na serwerze niezależnie od obecności użytkownika:
+     * TP1 (+3.2%): realizacja 33% pozycji i przestawienie SL na Break-Even.
+     * TP2 (+6.5%): realizacja kolejnych 33% pozycji.
+     * TP3 (+11.8%): pełne zamknięcie zyskownej pozycji.
+     * Stop Loss: automatyczne cięcie strat przy dotknięciu progu.
+   - Wszystkie zlecenia są natychmiast utrwalane w bazie danych PostgreSQL (trades i portfolios).
+
+3. POWIADOMIENIA TELEGRAM PROSTO Z SERWERA:
+   - Natychmiastowe wysyłanie komunikatów o zrealizowanych TP/SL i zakupach bezpośrednio na smartfon inwestora przez Telegram Bot API.
+
+================================================================================
 Wersja 2.2 (2026-11-08) - Pełna Implementacja Silnika Portfeli CryptoSignal Engine, Dwuwalutowość ($ USD / zł PLN), Pozycje SHORT, Smart Rebalance i Audyt Bota
 ================================================================================
 1. PEŁNA PARITYCZNA IMPLEMENTACJA MECHANIZMÓW Z CRYPTOSIGNAL ENGINE NA RYNKU AKCJI I SUROWCÓW:
@@ -470,7 +499,7 @@ Wersja 1.0 (2026-11-04) - Oficjalne Wydanie StockSignalPl
                   <span className="text-emerald-400">PL</span>
                 </h3>
                 <span className="px-2 py-0.5 text-xs font-bold bg-emerald-950 text-emerald-300 border border-emerald-500/60 rounded-full shadow-sm">
-                  v2.2
+                  v2.4
                 </span>
               </div>
               <p className="text-xs text-slate-400">Polski Rynek Giełdowy GPW Warszawa & Rynek Surowców</p>
