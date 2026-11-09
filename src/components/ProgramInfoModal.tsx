@@ -499,7 +499,7 @@ Wersja 1.0 (2026-11-04) - Oficjalne Wydanie StockSignalPl
                   <span className="text-emerald-400">PL</span>
                 </h3>
                 <span className="px-2 py-0.5 text-xs font-bold bg-emerald-950 text-emerald-300 border border-emerald-500/60 rounded-full shadow-sm">
-                  v2.4
+                  v2.4.2
                 </span>
               </div>
               <p className="text-xs text-slate-400">Polski Rynek Giełdowy GPW Warszawa & Rynek Surowców</p>

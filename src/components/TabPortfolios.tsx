@@ -665,6 +665,11 @@ export const TabPortfolios: React.FC<TabPortfoliosProps> = ({
   const [tradeSortField, setTradeSortField] = useState<'date' | 'ticker' | 'type' | 'pricePln' | 'shares' | 'totalPln' | 'resultPln'>('date');
   const [tradeSortOrder, setTradeSortOrder] = useState<'asc' | 'desc'>('desc');
 
+  // Pagination states
+  const [tradePage, setTradePage] = useState(0);
+  const [posPage, setPosPage] = useState(0);
+  const ITEMS_PER_PAGE = 10;
+
   const portfolioBarRef = useRef<HTMLDivElement>(null);
 
   const scrollPortfolios = (direction: 'left' | 'right') => {
@@ -921,6 +926,7 @@ export const TabPortfolios: React.FC<TabPortfoliosProps> = ({
       setPosSortField(field);
       setPosSortOrder('desc');
     }
+    setPosPage(0); // Reset page on sort
   };
 
   // Filtered & Sorted Trades
@@ -945,6 +951,7 @@ export const TabPortfolios: React.FC<TabPortfoliosProps> = ({
       setTradeSortField(field);
       setTradeSortOrder('desc');
     }
+    setTradePage(0); // Reset page on sort
   };
 
   return (
@@ -1348,6 +1355,11 @@ export const TabPortfolios: React.FC<TabPortfoliosProps> = ({
                   ))}
                 </tbody>
               </table>
+              <div className="flex items-center justify-center gap-2 pt-4">
+                <button onClick={() => setTradePage(Math.max(0, tradePage - 1))} disabled={tradePage === 0} className="px-3 py-1 bg-slate-800 rounded-lg text-xs disabled:opacity-50">Poprzednia</button>
+                <span className="text-xs text-slate-400">Strona {tradePage + 1}</span>
+                <button onClick={() => setTradePage(tradePage + 1)} disabled={(tradePage + 1) * ITEMS_PER_PAGE >= filteredAndSortedTrades.length} className="px-3 py-1 bg-slate-800 rounded-lg text-xs disabled:opacity-50">Następna</button>
+              </div>
             </div>
           </div>
 
@@ -1388,7 +1400,7 @@ export const TabPortfolios: React.FC<TabPortfoliosProps> = ({
                   </thead>
                   <tbody className="divide-y divide-slate-800/60 font-mono">
                     {portfolios.flatMap(p =>
-                      (p.activePositions || []).map(pos => (
+                      (p.activePositions || []).slice(posPage * ITEMS_PER_PAGE, (posPage + 1) * ITEMS_PER_PAGE).map(pos => (
                         <tr key={`${p.id}_${pos.id}`} className="hover:bg-slate-800/40 transition-colors">
                           <td className="py-3 px-3 font-sans">
                             <span className="text-xs font-semibold text-slate-300 block truncate max-w-[130px]">{p.name}</span>
@@ -1446,6 +1458,11 @@ export const TabPortfolios: React.FC<TabPortfoliosProps> = ({
                     )}
                   </tbody>
                 </table>
+                <div className="flex items-center justify-center gap-2 pt-4">
+                  <button onClick={() => setPosPage(Math.max(0, posPage - 1))} disabled={posPage === 0} className="px-3 py-1 bg-slate-800 rounded-lg text-xs disabled:opacity-50">Poprzednia</button>
+                  <span className="text-xs text-slate-400">Strona {posPage + 1}</span>
+                  <button onClick={() => setPosPage(posPage + 1)} disabled={(posPage + 1) * ITEMS_PER_PAGE >= aggregateStats.totalPositionsCount} className="px-3 py-1 bg-slate-800 rounded-lg text-xs disabled:opacity-50">Następna</button>
+                </div>
               </div>
             )}
           </div>
@@ -2392,7 +2409,7 @@ export const TabPortfolios: React.FC<TabPortfoliosProps> = ({
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800/60 font-mono">
-              {filteredAndSortedTrades.map(t => {
+              {filteredAndSortedTrades.slice(tradePage * ITEMS_PER_PAGE, (tradePage + 1) * ITEMS_PER_PAGE).map(t => {
                 return (
                   <tr key={t.id} className="hover:bg-slate-800/40 transition-colors">
                     {/* Sticky Column 1: Data i Godzina */}
@@ -2435,6 +2452,11 @@ export const TabPortfolios: React.FC<TabPortfoliosProps> = ({
               })}
             </tbody>
           </table>
+          <div className="flex items-center justify-center gap-2 pt-4">
+            <button onClick={() => setTradePage(Math.max(0, tradePage - 1))} disabled={tradePage === 0} className="px-3 py-1 bg-slate-800 rounded-lg text-xs disabled:opacity-50">Poprzednia</button>
+            <span className="text-xs text-slate-400">Strona {tradePage + 1}</span>
+            <button onClick={() => setTradePage(tradePage + 1)} disabled={(tradePage + 1) * ITEMS_PER_PAGE >= filteredAndSortedTrades.length} className="px-3 py-1 bg-slate-800 rounded-lg text-xs disabled:opacity-50">Następna</button>
+          </div>
         </div>
       </div>
 

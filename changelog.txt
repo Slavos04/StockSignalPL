@@ -1,4 +1,11 @@
 ================================================================================
+Wersja 2.4.2 (2026-11-09) - Paginacja Dziennika Tradera
+================================================================================
+1. PAGINACJA W TABELACH PORTFELI:
+   - Dodano paginację w tabeli Dziennik Tradera (maksymalnie 10 pozycji na stronę).
+   - Zachowano sortowanie danych niezależnie od paginacji.
+
+================================================================================
 CHANGELOG - HISTORIA ZMIAN I WERSJI STOCKSIGNALPL
 ================================================================================
 

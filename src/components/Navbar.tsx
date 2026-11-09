@@ -298,7 +298,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                     <span className="text-emerald-400">PL</span>
                   </span>
                   <span className="px-1.5 py-0.5 text-[10px] font-bold bg-emerald-950/80 text-emerald-300 border border-emerald-500/40 rounded shadow-sm shadow-emerald-950/40">
-                    v2.0
+                    v2.4.2
                   </span>
                 </div>
                 <p className="text-[11px] text-slate-400 tracking-wider">Silnik Sygnałów Giełdowych GPW, WIG20 & Surowce</p>
@@ -384,7 +384,7 @@ export const Navbar: React.FC<NavbarProps> = ({
             {/* Info Icon Button (i) */}
             <button
               onClick={onOpenInfoModal}
-              title="Informacje o programie StockSignalPL, numer wersji (v2.4) oraz pełny Changelog"
+              title="Informacje o programie StockSignalPL, numer wersji (v2.4.2) oraz pełny Changelog"
               className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 transition-colors cursor-pointer"
             >
               <Info className="w-4 h-4 text-sky-400" />
