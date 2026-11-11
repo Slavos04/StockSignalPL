@@ -1,4 +1,22 @@
 ================================================================================
+Wersja 2.4.4 (2026-11-10) - Pełna Egzekucja w Tle 24/7 (Server Daemon Fix) & Precyzja Czasu Transakcji
+================================================================================
+1. AUTONOMICZNA EGZEKUCJA PO ZAMKNIĘCIU PRZEGLĄDARKI (DEMON SERWEROWY):
+   - Naprawiono wewnętrzny protokół pobierania notowań w demonie (zamiana błędnego połączenia HTTPS i nieistniejącego endpointu na szybki HTTP /api/market-quotes).
+   - Zainicjalizowano portfele użytkowników w buforze pamięci serwera już w momencie startu serwera Node.js (demon od razu monitoruje portfele z włączonym Auto-Pilotem).
+   - Wdrożono dynamiczne dopinanie tickerów ze wszystkich otwartych pozycji do zapytań o notowania rynkowe.
+   - Wprowadzono automatyczną dwukierunkową synchronizację portfeli i transakcji (zapis z przeglądarki do bazy serwera oraz automatyczne pobieranie po powrocie do okna).
+
+2. GODZINA TRANSAKCJI VS GODZINA POWIADOMIENIA:
+   - W powiadomieniach Telegram wprowadzono jawne, dedykowane pole: "Godzina transakcji: HH:MM:SS (DD.MM.YYYY)".
+   - W powiadomieniach Toast w aplikacji czas jest generowany w sekundzie egzekucji zlecenia (`timestamp` z formatem HH:MM:SS).
+   - W Dzienniku Tradera pierwsza kolumna rejestruje dokładny czas zawarcia transakcji na giełdzie z dokładnością do sekundy.
+
+3. KONTROLA SESJI TESTOWEJ W PANELU ADMINA:
+   - Dodano podgląd statusu demona w czasie rzeczywistym (liczba monitorowanych portfeli, wynik ostatniego cyklu).
+   - Wprowadzono przełącznik trybu testowego sesji 24/7 w panelu demona do testowania poza godzinami GPW.
+
+================================================================================
 Wersja 2.4.3 (2026-11-09) - Data Utworzenia Portfela, Wykres Otwartych Pozycji & Ścisła Spójność Wartości Portfela
 ================================================================================
 1. DATA UTWORZENIA PORTFELA (createdAt):

@@ -10,7 +10,9 @@ import {
   dbSavePortfolio,
   dbDeletePortfolio,
   dbGetTrades,
-  dbSaveTrade
+  dbSaveTrade,
+  dbGetSettings,
+  dbSaveSettings
 } from './src/server/db';
 import { ServerAutoPilotDaemon } from './src/server/serverAutoPilotDaemon';
 
@@ -811,11 +813,32 @@ async function startServer() {
   });
 
   // ==========================================
-  // 5.5 SERVER AUTOPILOT DAEMON ADMIN API
+  // 5.5 SERVER SETTINGS & AUTOPILOT DAEMON ADMIN API
   // ==========================================
-  app.get('/api/admin/daemon-settings', (req: Request, res: Response) => {
+  app.get('/api/settings', async (req: Request, res: Response) => {
     try {
-      const status = ServerAutoPilotDaemon.getStatus();
+      const userId = (req.query.userId as string) || (req.headers['x-user-id'] as string) || 'usr_admin';
+      const settings = await dbGetSettings(userId);
+      return res.json({ success: true, settings });
+    } catch (err: any) {
+      return res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  app.post('/api/settings', async (req: Request, res: Response) => {
+    try {
+      const userId = (req.body.userId as string) || (req.headers['x-user-id'] as string) || 'usr_admin';
+      const settings = req.body.settings || req.body;
+      await dbSaveSettings(userId, settings);
+      return res.json({ success: true, message: 'Ustawienia zapisane na serwerze.' });
+    } catch (err: any) {
+      return res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  app.get('/api/admin/daemon-settings', async (req: Request, res: Response) => {
+    try {
+      const status = await ServerAutoPilotDaemon.getStatus();
       return res.json({
         success: true,
         ...status
@@ -825,18 +848,23 @@ async function startServer() {
     }
   });
 
-  app.post('/api/admin/daemon-settings', (req: Request, res: Response) => {
+  app.post('/api/admin/daemon-settings', async (req: Request, res: Response) => {
     try {
-      const { intervalMs } = req.body;
-      const parsedInterval = parseInt(intervalMs, 10);
-      if (isNaN(parsedInterval) || parsedInterval < 1000) {
-        return res.status(400).json({ success: false, error: 'Nieprawidłowy interwał silnika.' });
+      const { intervalMs, forceSessionOpenTest } = req.body;
+      if (intervalMs !== undefined) {
+        const parsedInterval = parseInt(intervalMs, 10);
+        if (!isNaN(parsedInterval) && parsedInterval >= 1000) {
+          ServerAutoPilotDaemon.setIntervalMs(parsedInterval);
+        }
       }
-      ServerAutoPilotDaemon.setIntervalMs(parsedInterval);
+      if (forceSessionOpenTest !== undefined) {
+        ServerAutoPilotDaemon.setForceSessionOpenTest(Boolean(forceSessionOpenTest));
+      }
+      const status = await ServerAutoPilotDaemon.getStatus();
       return res.json({
         success: true,
-        message: `Pomyślnie zaktualizowano interwał silnika serwera na ${parsedInterval / 1000}s.`,
-        ...ServerAutoPilotDaemon.getStatus()
+        message: 'Pomyślnie zaktualizowano parametry silnika serwerowego.',
+        ...status
       });
     } catch (err: any) {
       return res.status(500).json({ success: false, error: err.message });

@@ -3,6 +3,7 @@ import { INITIAL_PORTFOLIOS, INITIAL_TRADES } from '../data/initialData';
 import { AudioService } from './audioService';
 import { MarketSessionService } from './marketSessionService';
 import { SettingsService } from './settingsService';
+import { AuthService } from './authService';
 
 const PORTFOLIOS_STORAGE_KEY = 'stocksignalpl_portfolios_v1';
 const TRADES_STORAGE_KEY = 'stocksignalpl_trades_v1';
@@ -63,6 +64,13 @@ export class PortfolioService {
 
   public static savePortfolios(): void {
     localStorage.setItem(PORTFOLIOS_STORAGE_KEY, JSON.stringify(this.portfolios));
+    try {
+      const user = AuthService.getCurrentUser();
+      const userId = user?.id || 'usr_admin';
+      this.portfolios.forEach(p => {
+        this.syncPortfolioToServer(userId, p);
+      });
+    } catch {}
   }
 
   public static setPortfolios(newList: PortfolioStrategy[]): void {
@@ -72,6 +80,13 @@ export class PortfolioService {
 
   public static saveTrades(): void {
     localStorage.setItem(TRADES_STORAGE_KEY, JSON.stringify(this.trades));
+    try {
+      const user = AuthService.getCurrentUser();
+      const userId = user?.id || 'usr_admin';
+      if (this.trades.length > 0) {
+        this.syncTradeToServer(userId, this.trades[0]);
+      }
+    } catch {}
   }
 
   public static setTrades(newList: TradeRecord[]): void {

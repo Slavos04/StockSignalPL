@@ -14,12 +14,15 @@ const memoryPortfolios = new Map<string, any[]>();
 const memoryTrades = new Map<string, any[]>();
 const memorySettings = new Map<string, any>();
 
-// Initialize default users in memory
+// Initialize default users and their portfolios in memory
 INITIAL_USERS.forEach(u => {
   memoryUsers.set(u.id, {
     ...u,
     password_hash: u.username === 'admin' ? 'Admin123!' : 'gpw2026!'
   });
+  // Pre-seed default portfolios & trades so server daemon has data immediately on boot
+  memoryPortfolios.set(u.id, JSON.parse(JSON.stringify(INITIAL_PORTFOLIOS)));
+  memoryTrades.set(u.id, JSON.parse(JSON.stringify(INITIAL_TRADES)));
 });
 
 export async function initPostgres(): Promise<void> {
@@ -455,3 +458,42 @@ export async function dbGetSettings(userId: string): Promise<any | null> {
   }
   return memorySettings.get(userId) || null;
 }
+
+export async function dbSaveSettings(userId: string, s: any): Promise<void> {
+  if (isPostgresConnected && pool) {
+    try {
+      await pool.query(
+        `INSERT INTO settings (user_id, theme, custom_bg_url, refresh_interval_sec, bg_opacity, bg_blur, bot_token, chat_id, alerts_enabled, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, CURRENT_TIMESTAMP)
+         ON CONFLICT (user_id) DO UPDATE SET
+           theme = EXCLUDED.theme,
+           custom_bg_url = EXCLUDED.custom_bg_url,
+           refresh_interval_sec = EXCLUDED.refresh_interval_sec,
+           bg_opacity = EXCLUDED.bg_opacity,
+           bg_blur = EXCLUDED.bg_blur,
+           bot_token = EXCLUDED.bot_token,
+           chat_id = EXCLUDED.chat_id,
+           alerts_enabled = EXCLUDED.alerts_enabled,
+           updated_at = CURRENT_TIMESTAMP`,
+        [
+          userId,
+          s.theme || 'dark',
+          s.customBgUrl || '',
+          s.refreshIntervalSec || 4,
+          s.bgOpacity || 85,
+          s.bgBlur || 0,
+          s.botToken || s.bot_token || '',
+          s.chatId || s.chat_id || '',
+          Boolean(s.alertsEnabled ?? s.alerts_enabled ?? true)
+        ]
+      );
+      return;
+    } catch (e) {
+      console.error('[PostgreSQL] dbSaveSettings error:', e);
+    }
+  }
+
+  const existing = memorySettings.get(userId) || {};
+  memorySettings.set(userId, { ...existing, ...s });
+}
+

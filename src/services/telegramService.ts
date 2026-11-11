@@ -28,6 +28,18 @@ export class TelegramService {
   public static saveSettings(settings: Partial<TelegramSettings>): TelegramSettings {
     this.settings = { ...this.getSettings(), ...settings };
     localStorage.setItem(TELEGRAM_STORAGE_KEY, JSON.stringify(this.settings));
+
+    // Transparently synchronize bot token and chatId to server so background daemon can send alerts
+    fetch('/api/settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        bot_token: this.settings.botToken,
+        chat_id: this.settings.chatId,
+        alerts_enabled: this.settings.alertsEnabled
+      })
+    }).catch(() => {});
+
     return this.settings;
   }
 

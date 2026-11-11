@@ -93,23 +93,42 @@ export default function App() {
     setUsers(AuthService.getUsers());
   }, []);
 
-  // Transparent server PostgreSQL fetch on login
+  // Transparent server PostgreSQL fetch on login and background synchronization
   useEffect(() => {
     if (!currentUser?.id) return;
 
-    // Fetch user's persistent portfolios from server PostgreSQL
-    PortfolioService.fetchPortfoliosFromServer(currentUser.id).then((serverPortfolios) => {
-      if (serverPortfolios && serverPortfolios.length > 0) {
-        setPortfolios(serverPortfolios);
-      }
-    }).catch(console.error);
+    const syncWithServer = () => {
+      PortfolioService.fetchPortfoliosFromServer(currentUser.id).then((serverPortfolios) => {
+        if (serverPortfolios && serverPortfolios.length > 0) {
+          setPortfolios(serverPortfolios);
+        }
+      }).catch(() => {});
 
-    // Fetch user's persistent trades from server PostgreSQL
-    PortfolioService.fetchTradesFromServer(currentUser.id).then((serverTrades) => {
-      if (serverTrades && serverTrades.length > 0) {
-        setTrades(serverTrades);
+      PortfolioService.fetchTradesFromServer(currentUser.id).then((serverTrades) => {
+        if (serverTrades && serverTrades.length > 0) {
+          setTrades(serverTrades);
+        }
+      }).catch(() => {});
+    };
+
+    // First fetch immediately on login
+    syncWithServer();
+
+    // Re-sync when user returns to the tab after closing/minimizing window
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        syncWithServer();
       }
-    }).catch(console.error);
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+
+    // Periodic background sync every 15 seconds to receive trades executed by server daemon
+    const syncTimer = setInterval(syncWithServer, 15000);
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibility);
+      clearInterval(syncTimer);
+    };
   }, [currentUser?.id]);
 
   // GPW Warsaw Market Session status

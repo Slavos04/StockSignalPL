@@ -63,17 +63,29 @@ export const TabAdminSettings: React.FC<TabAdminSettingsProps> = ({
   const [daemonIntervalMs, setDaemonIntervalMs] = useState<number>(15000);
   const [isSavingDaemonInterval, setIsSavingDaemonInterval] = useState<boolean>(false);
   const [daemonMessage, setDaemonMessage] = useState<string | null>(null);
+  const [daemonSummary, setDaemonSummary] = useState<string>('Silnik gotowy');
+  const [monitoredCount, setMonitoredCount] = useState<number>(0);
+  const [daemonForceSession, setDaemonForceSession] = useState<boolean>(false);
 
-  // Fetch daemon status on load
+  // Fetch daemon status on load and periodically
   React.useEffect(() => {
-    fetch('/api/admin/daemon-settings')
-      .then(res => res.json())
-      .then(data => {
-        if (data.success && data.intervalMs) {
-          setDaemonIntervalMs(data.intervalMs);
-        }
-      })
-      .catch(() => {});
+    const fetchStatus = () => {
+      fetch('/api/admin/daemon-settings')
+        .then(res => res.json())
+        .then(data => {
+          if (data.success) {
+            if (data.intervalMs) setDaemonIntervalMs(data.intervalMs);
+            if (data.lastExecutionSummary) setDaemonSummary(data.lastExecutionSummary);
+            if (data.monitoredPortfoliosCount !== undefined) setMonitoredCount(data.monitoredPortfoliosCount);
+            if (data.forceSessionOpenTest !== undefined) setDaemonForceSession(data.forceSessionOpenTest);
+          }
+        })
+        .catch(() => {});
+    };
+
+    fetchStatus();
+    const interval = setInterval(fetchStatus, 10000);
+    return () => clearInterval(interval);
   }, []);
 
   const handleUpdateDaemonInterval = async (newMs: number) => {
@@ -88,6 +100,8 @@ export const TabAdminSettings: React.FC<TabAdminSettingsProps> = ({
       const data = await res.json();
       if (data.success) {
         setDaemonMessage(data.message || 'Pomyślnie zaktualizowano interwał silnika serwera.');
+        if (data.lastExecutionSummary) setDaemonSummary(data.lastExecutionSummary);
+        if (data.monitoredPortfoliosCount !== undefined) setMonitoredCount(data.monitoredPortfoliosCount);
         setTimeout(() => setDaemonMessage(null), 4000);
       }
     } catch {
@@ -95,6 +109,26 @@ export const TabAdminSettings: React.FC<TabAdminSettingsProps> = ({
       setTimeout(() => setDaemonMessage(null), 4000);
     } finally {
       setIsSavingDaemonInterval(false);
+    }
+  };
+
+  const handleToggleForceSession = async () => {
+    const nextVal = !daemonForceSession;
+    setDaemonForceSession(nextVal);
+    try {
+      const res = await fetch('/api/admin/daemon-settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ forceSessionOpenTest: nextVal })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setDaemonMessage(`Zmieniono tryb testu sesji na: ${nextVal ? 'Wymuszony 24/7' : 'Standardowy (kalendarz GPW)'}`);
+        setTimeout(() => setDaemonMessage(null), 4000);
+      }
+    } catch {
+      setDaemonMessage('Błąd zmiany trybu sesji demona.');
+      setTimeout(() => setDaemonMessage(null), 4000);
     }
   };
 
@@ -739,13 +773,40 @@ XAU KUPUJ Cena: 16133.00 Target: 18500.00`
               })}
             </div>
 
-            <div className="p-3 bg-slate-950/60 rounded-xl border border-slate-800/80 flex flex-wrap items-center justify-between text-xs text-slate-400 gap-2">
-              <div className="flex items-center gap-2">
-                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-                <span>Status Silnika: <strong className="text-emerald-400">AKTYWNY 24/7</strong> (Działa w procesie Node.js w tle serwera)</span>
+            <div className="p-4 bg-slate-950/70 rounded-2xl border border-slate-800 space-y-2 text-xs">
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800/80 pb-2">
+                <div className="flex items-center gap-2">
+                  <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                  <span className="font-bold text-white">Status Autonomicznego Silnika Bota:</span>
+                  <span className="px-2 py-0.5 rounded-full bg-emerald-950 text-emerald-400 font-bold border border-emerald-500/40 text-[11px]">
+                    AKTYWNY 24/7 (Serwer Node.js)
+                  </span>
+                </div>
+                <div className="flex items-center gap-3 text-slate-300 font-mono text-[11px]">
+                  <span>Monitorowane portfele: <strong className="text-white">{monitoredCount}</strong></span>
+                  <span>•</span>
+                  <span>Ostatni cykl: <strong className="text-cyan-400 font-sans">{daemonSummary}</strong></span>
+                </div>
               </div>
-              <div className="text-[11px] text-slate-400">
-                Wpływ: częstsze cykle (30s, 1m) to szybsza reakcja na TP/SL; dłuższe cykle (30m, 1g+) to mniejsze zużycie zapytań do feedu notowań.
+
+              <div className="flex flex-wrap items-center justify-between gap-3 pt-1 text-[11px]">
+                <div className="text-slate-400">
+                  Transakcje TP/SL i zakupy Auto-Pilota są egzekwowane bezpośrednio na serwerze niezależnie od tego, czy użytkownik jest zalogowany i czy okno przeglądarki jest włączone.
+                </div>
+                <button
+                  onClick={handleToggleForceSession}
+                  className={`px-3 py-1 rounded-xl text-xs font-bold border transition-all cursor-pointer flex items-center gap-1.5 ${
+                    daemonForceSession
+                      ? 'bg-amber-950/80 text-amber-300 border-amber-500/60 shadow-sm'
+                      : 'bg-slate-900 hover:bg-slate-800 text-slate-300 border-slate-700'
+                  }`}
+                  title="Wymuś aktywność silnika transakcyjnego 24/7 również poza godzinami sesji GPW do celów testowych"
+                >
+                  <span>Tryb 24/7 Sesji (Testy poza GPW):</span>
+                  <span className={`px-1.5 py-0.2 rounded text-[10px] font-black ${daemonForceSession ? 'bg-amber-500 text-slate-950' : 'bg-slate-800 text-slate-400'}`}>
+                    {daemonForceSession ? 'WŁĄCZONY' : 'WYŁĄCZONY'}
+                  </span>
+                </button>
               </div>
             </div>
           </div>

@@ -37,6 +37,29 @@ export class SettingsService {
     if (settings.theme) {
       this.applyTheme(settings.theme);
     }
+
+    // Sync settings to server
+    fetch('/api/settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        theme: this.settings.theme,
+        refresh_interval_sec: this.settings.refreshIntervalSec,
+        custom_bg_url: this.settings.customBgUrl,
+        bg_opacity: this.settings.bgOpacity,
+        bg_blur: this.settings.bgBlur
+      })
+    }).catch(() => {});
+
+    // Sync test session mode to server daemon if specified
+    if (settings.forceSessionOpenTest !== undefined) {
+      fetch('/api/admin/daemon-settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ forceSessionOpenTest: settings.forceSessionOpenTest })
+      }).catch(() => {});
+    }
+
     return this.settings;
   }
 
