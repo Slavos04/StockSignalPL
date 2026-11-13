@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
-import { PortfolioStrategy, StockQuote } from '../types/stock';
+import { PortfolioStrategy, StockQuote, AppCurrency } from '../types/stock';
 import { PortfolioService } from '../services/portfolioService';
-import { RefreshCw, X, AlertTriangle, TrendingUp, CheckCircle2, DollarSign, ArrowRight } from 'lucide-react';
+import { SettingsService } from '../services/settingsService';
+import { RefreshCw, X, AlertTriangle, TrendingUp, CheckCircle2 } from 'lucide-react';
 
 interface SmartRebalanceModalProps {
   portfolio: PortfolioStrategy | null;
@@ -9,6 +10,8 @@ interface SmartRebalanceModalProps {
   isOpen: boolean;
   onClose: () => void;
   onRebalanceComplete: (updatedPortfolio: PortfolioStrategy) => void;
+  currency?: AppCurrency;
+  usdPlnRate?: number;
 }
 
 export const SmartRebalanceModal: React.FC<SmartRebalanceModalProps> = ({
@@ -16,14 +19,21 @@ export const SmartRebalanceModal: React.FC<SmartRebalanceModalProps> = ({
   stockQuotes,
   isOpen,
   onClose,
-  onRebalanceComplete
+  onRebalanceComplete,
+  currency = 'PLN',
+  usdPlnRate = 3.97
 }) => {
   const [isProcessing, setIsProcessing] = useState(false);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
   if (!isOpen || !portfolio) return null;
 
-  // Identify weak positions (PnL < 0 or low trend score < 50)
+  const fmtMoney = (val: number, decimals: number = 2) =>
+    SettingsService.formatMoney(val, currency, usdPlnRate, decimals);
+  const fmtSignedMoney = (val: number, decimals: number = 2) =>
+    SettingsService.formatSignedMoney(val, currency, usdPlnRate, decimals);
+
+  // Identify weak positions (PnL < 0 or low trend score < 52)
   const weakPositions = portfolio.activePositions.filter(pos => {
     const stock = stockQuotes.find(s => s.symbol === pos.ticker || s.cleanSymbol === pos.ticker);
     return pos.pnlPercent < -2 || (stock && (stock.trendScore || 50) < 52);
@@ -72,6 +82,7 @@ export const SmartRebalanceModal: React.FC<SmartRebalanceModalProps> = ({
       <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-xl p-6 shadow-2xl relative flex flex-col max-h-[90vh]">
         <button
           onClick={onClose}
+          title="Zamknij okno Smart Rebalance"
           className="absolute top-4 right-4 p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 cursor-pointer"
         >
           <X className="w-5 h-5" />
@@ -96,6 +107,7 @@ export const SmartRebalanceModal: React.FC<SmartRebalanceModalProps> = ({
             <p>{successMsg}</p>
             <button
               onClick={onClose}
+              title="Zamknij podsumowanie rebalancingu"
               className="w-full py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl cursor-pointer"
             >
               Zamknij
@@ -105,17 +117,17 @@ export const SmartRebalanceModal: React.FC<SmartRebalanceModalProps> = ({
           <div className="space-y-4 overflow-y-auto pr-1 flex-1 text-xs">
             {/* Status overview */}
             <div className="grid grid-cols-3 gap-2.5 p-3 rounded-xl bg-slate-950/80 border border-slate-800 text-center font-mono">
-              <div>
+              <div title="Aktualna całkowita wycena portfela">
                 <span className="text-[10px] text-slate-400 block font-sans">Wycena Portfela:</span>
-                <span className="text-white font-bold">{portfolio.currentBalance.toLocaleString('pl-PL')} zł</span>
+                <span className="text-white font-bold">{fmtMoney(portfolio.currentBalance, 0)}</span>
               </div>
-              <div>
+              <div title="Liczba aktualnie otwartych pozycji">
                 <span className="text-[10px] text-slate-400 block font-sans">Alokowane Pozycje:</span>
-                <span className="text-amber-300 font-bold">{portfolio.activePositions.length} szuk.</span>
+                <span className="text-amber-300 font-bold">{portfolio.activePositions.length} szt.</span>
               </div>
-              <div>
+              <div title="Dostępna wolna gotówka">
                 <span className="text-[10px] text-slate-400 block font-sans">Wolna Gotówka:</span>
-                <span className="text-emerald-400 font-bold">{portfolio.cashPln.toLocaleString('pl-PL')} zł</span>
+                <span className="text-emerald-400 font-bold">{fmtMoney(portfolio.cashPln, 0)}</span>
               </div>
             </div>
 
@@ -123,7 +135,7 @@ export const SmartRebalanceModal: React.FC<SmartRebalanceModalProps> = ({
             <div>
               <h4 className="font-bold text-slate-300 mb-1.5 flex items-center gap-1.5">
                 <AlertTriangle className="w-3.5 h-3.5 text-amber-400" />
-                <span>Wyryte Pozycje do Zamknięcia / Redukcji ({weakPositions.length}):</span>
+                <span>Wykryte Pozycje do Zamknięcia / Redukcji ({weakPositions.length}):</span>
               </h4>
               {weakPositions.length === 0 ? (
                 <div className="p-2.5 rounded-lg bg-emerald-950/30 border border-emerald-800/40 text-emerald-300 text-[11px]">
@@ -137,7 +149,7 @@ export const SmartRebalanceModal: React.FC<SmartRebalanceModalProps> = ({
                         <span className="font-bold text-white">{pos.ticker}</span>
                         <span className="text-slate-400 ml-2">{pos.name} ({pos.shares} szt.)</span>
                       </div>
-                      <span className="font-mono text-rose-400 font-bold">{pos.pnlPercent.toFixed(2)}% ({pos.pnlPln.toLocaleString('pl-PL')} zł)</span>
+                      <span className="font-mono text-rose-400 font-bold">{pos.pnlPercent.toFixed(2)}% ({fmtSignedMoney(pos.pnlPln)})</span>
                     </div>
                   ))}
                 </div>
@@ -158,7 +170,7 @@ export const SmartRebalanceModal: React.FC<SmartRebalanceModalProps> = ({
                       <span className="text-slate-300">{stock.name}</span>
                     </div>
                     <div className="flex items-center gap-3 font-mono">
-                      <span className="text-slate-400">{stock.price.toFixed(2)} zł</span>
+                      <span className="text-slate-400">{fmtMoney(stock.price)}</span>
                       <span className="px-2 py-0.5 rounded bg-emerald-950 text-emerald-300 border border-emerald-800 text-[10px] font-bold">
                         Konsensus: {stock.trendScore || 85}%
                       </span>
@@ -173,6 +185,7 @@ export const SmartRebalanceModal: React.FC<SmartRebalanceModalProps> = ({
                 type="button"
                 disabled={isProcessing}
                 onClick={handleExecuteRebalance}
+                title="Zamknij słabe pozycje, dokup liderów konsensusu i zoptymalizuj proporcje wag"
                 className="w-full py-2.5 rounded-xl bg-gradient-to-r from-teal-600 to-emerald-600 hover:from-teal-500 hover:to-emerald-500 text-white font-bold transition-all shadow-md cursor-pointer flex items-center justify-center gap-2"
               >
                 {isProcessing ? (

@@ -8,7 +8,7 @@ export class SettingsService {
     customBgUrl: '',
     refreshIntervalSec: 4,
     currency: 'PLN',
-    usdPlnRate: 4.02,
+    usdPlnRate: 3.97,
     bgOpacity: 80,
     bgBlur: 0,
     forceSessionOpenTest: false
@@ -29,6 +29,52 @@ export class SettingsService {
 
   public static getSettings(): AppSettings {
     return this.initialize();
+  }
+
+  public static updateUsdPlnRate(rate: number): number {
+    if (!rate || !isFinite(rate) || rate <= 0) return this.getUsdPlnRate();
+    const rounded = Number(rate.toFixed(4));
+    const current = this.getSettings();
+    if (Math.abs((current.usdPlnRate || 0) - rounded) >= 0.0001) {
+      this.settings = { ...current, usdPlnRate: rounded };
+      try {
+        localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(this.settings));
+      } catch {}
+    }
+    return rounded;
+  }
+
+  public static getCurrency(settings?: AppSettings): AppCurrency {
+    return (settings?.currency || this.getSettings().currency || 'PLN') as AppCurrency;
+  }
+
+  public static getUsdPlnRate(settings?: AppSettings): number {
+    const r = settings?.usdPlnRate || this.getSettings().usdPlnRate || 3.97;
+    return r > 0 ? r : 3.97;
+  }
+
+  public static getCurrencySymbol(currency?: AppCurrency): string {
+    const curr = currency || this.getCurrency();
+    return curr === 'USD' ? '$' : 'zł';
+  }
+
+  public static getCurrencyCode(currency?: AppCurrency): string {
+    const curr = currency || this.getCurrency();
+    return curr === 'USD' ? 'USD' : 'PLN';
+  }
+
+  public static convertFromPln(plnValue: number, currency?: AppCurrency, rate?: number): number {
+    const curr = currency || this.getCurrency();
+    const fx = rate && rate > 0 ? rate : this.getUsdPlnRate();
+    if (!isFinite(plnValue)) return 0;
+    return curr === 'USD' ? plnValue / fx : plnValue;
+  }
+
+  public static convertToPln(valueInDisplayCurrency: number, currency?: AppCurrency, rate?: number): number {
+    const curr = currency || this.getCurrency();
+    const fx = rate && rate > 0 ? rate : this.getUsdPlnRate();
+    if (!isFinite(valueInDisplayCurrency)) return 0;
+    return curr === 'USD' ? valueInDisplayCurrency * fx : valueInDisplayCurrency;
   }
 
   public static saveSettings(settings: Partial<AppSettings>): AppSettings {
@@ -70,16 +116,61 @@ export class SettingsService {
     }
   }
 
-  public static formatMoney(plnValue: number, settings?: AppSettings): string {
-    const currentSettings = settings || this.getSettings();
-    const curr = currentSettings.currency || 'PLN';
-    const rate = currentSettings.usdPlnRate || 4.02;
+  public static formatMoney(
+    plnValue: number,
+    settingsOrCurrency?: AppSettings | AppCurrency,
+    rateOverride?: number,
+    decimals: number = 2
+  ): string {
+    const isString = typeof settingsOrCurrency === 'string';
+    const currentSettings = !isString && settingsOrCurrency ? settingsOrCurrency : this.getSettings();
+    const curr: AppCurrency = isString ? (settingsOrCurrency as AppCurrency) : (currentSettings.currency || 'PLN');
+    const rate = rateOverride && rateOverride > 0 ? rateOverride : (currentSettings.usdPlnRate || 3.97);
+    const val = Number.isFinite(plnValue) ? plnValue : 0;
 
     if (curr === 'USD') {
-      const usd = plnValue / rate;
-      return `$${usd.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+      const usd = val / rate;
+      const absStr = Math.abs(usd).toLocaleString('en-US', {
+        minimumFractionDigits: decimals,
+        maximumFractionDigits: decimals
+      });
+      return `${usd < 0 ? '-' : ''}$${absStr}`;
     }
-    return `${plnValue.toLocaleString('pl-PL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} zł`;
+    return `${val.toLocaleString('pl-PL', {
+      minimumFractionDigits: decimals,
+      maximumFractionDigits: decimals
+    })} zł`;
+  }
+
+  public static formatSignedMoney(
+    plnValue: number,
+    currency?: AppCurrency,
+    rate?: number,
+    decimals: number = 2
+  ): string {
+    const val = Number.isFinite(plnValue) ? plnValue : 0;
+    const prefix = val > 0 ? '+' : '';
+    return `${prefix}${this.formatMoney(val, currency || this.getCurrency(), rate, decimals)}`;
+  }
+
+  public static formatCompactMoney(
+    plnValue: number,
+    currency?: AppCurrency,
+    rate?: number
+  ): string {
+    const curr = currency || this.getCurrency();
+    const val = this.convertFromPln(Number.isFinite(plnValue) ? plnValue : 0, curr, rate);
+    const abs = Math.abs(val);
+    const sign = val < 0 ? '-' : '';
+    if (abs >= 1_000_000) {
+      const str = (abs / 1_000_000).toFixed(2);
+      return curr === 'USD' ? `${sign}$${str}M` : `${sign}${str}M zł`;
+    }
+    if (abs >= 1_000) {
+      const str = (abs / 1_000).toFixed(1);
+      return curr === 'USD' ? `${sign}$${str}k` : `${sign}${str}k zł`;
+    }
+    const str = abs.toFixed(0);
+    return curr === 'USD' ? `${sign}$${str}` : `${sign}${str} zł`;
   }
 }
-

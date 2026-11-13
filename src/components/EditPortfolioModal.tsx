@@ -1,21 +1,18 @@
 import React, { useState, useEffect } from 'react';
-import { PortfolioStrategy, MarketSegment } from '../types/stock';
+import { PortfolioStrategy, MarketSegment, AppCurrency } from '../types/stock';
 import { PortfolioService } from '../services/portfolioService';
+import { SettingsService } from '../services/settingsService';
 import {
-  Settings,
   X,
   CheckCircle2,
   AlertCircle,
-  Layers,
   Zap,
-  Send,
   PlusCircle,
   RotateCcw,
   Trash2,
   Shield,
   Cpu,
   TrendingUp,
-  Sliders,
   HelpCircle
 } from 'lucide-react';
 
@@ -24,6 +21,8 @@ interface EditPortfolioModalProps {
   isOpen: boolean;
   onClose: () => void;
   onPortfolioUpdated: (updatedPortfolio: PortfolioStrategy) => void;
+  currency?: AppCurrency;
+  usdPlnRate?: number;
 }
 
 const MARKET_OPTIONS: { id: MarketSegment; label: string; sub: string; icon: string }[] = [
@@ -37,7 +36,9 @@ export const EditPortfolioModal: React.FC<EditPortfolioModalProps> = ({
   portfolio,
   isOpen,
   onClose,
-  onPortfolioUpdated
+  onPortfolioUpdated,
+  currency = 'PLN',
+  usdPlnRate = 3.97
 }) => {
   // 1. Podstawowe
   const [name, setName] = useState('');
@@ -120,6 +121,8 @@ export const EditPortfolioModal: React.FC<EditPortfolioModalProps> = ({
 
   if (!isOpen || !portfolio) return null;
 
+  const currCode = SettingsService.getCurrencyCode(currency);
+
   const toggleMarket = (marketId: MarketSegment) => {
     if (allowedMarkets.includes(marketId)) {
       setAllowedMarkets(allowedMarkets.filter(m => m !== marketId));
@@ -129,7 +132,7 @@ export const EditPortfolioModal: React.FC<EditPortfolioModalProps> = ({
   };
 
   const handleReset = () => {
-    if (window.confirm(`Czy na pewno chcesz zresetować portfel "${portfolio.name}" do kapitału początkowego ${portfolio.initialCapital.toLocaleString('pl-PL')} PLN? Otwarte pozycje zostaną usunięte.`)) {
+    if (window.confirm(`Czy na pewno chcesz zresetować portfel "${portfolio.name}" do kapitału początkowego ${SettingsService.formatMoney(portfolio.initialCapital, currency, usdPlnRate, 0)}? Otwarte pozycje zostaną usunięte.`)) {
       const res = PortfolioService.resetPortfolio(portfolio.id);
       if (res.success && res.portfolio) {
         onPortfolioUpdated(res.portfolio);
@@ -162,6 +165,10 @@ export const EditPortfolioModal: React.FC<EditPortfolioModalProps> = ({
       return;
     }
 
+    const cashPlnToAdd = addCashPln > 0
+      ? Number(SettingsService.convertToPln(addCashPln, currency, usdPlnRate).toFixed(2))
+      : undefined;
+
     const res = PortfolioService.updatePortfolioStrategy(portfolio.id, {
       name: name.trim(),
       shortDesc: shortDesc.trim(),
@@ -193,7 +200,7 @@ export const EditPortfolioModal: React.FC<EditPortfolioModalProps> = ({
       anchorLeaderCorrelation,
       anchorLeaderLagMinutes,
 
-      addCashPln: addCashPln > 0 ? addCashPln : undefined
+      addCashPln: cashPlnToAdd
     });
 
     if (res.success && res.portfolio) {
@@ -210,6 +217,7 @@ export const EditPortfolioModal: React.FC<EditPortfolioModalProps> = ({
         {/* Zamknij Modal */}
         <button
           onClick={onClose}
+          title="Zamknij konfigurację strategii"
           className="absolute top-4 right-4 p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 cursor-pointer transition-colors"
         >
           <X className="w-5 h-5" />
@@ -697,19 +705,20 @@ export const EditPortfolioModal: React.FC<EditPortfolioModalProps> = ({
             <div className="flex items-center justify-between">
               <label className="text-emerald-300 font-semibold flex items-center gap-1.5 text-xs">
                 <PlusCircle className="w-3.5 h-3.5 text-emerald-400" />
-                <span>Zasilanie Portfela (Dopłata Gotówki PLN):</span>
+                <span>Zasilanie Portfela (Dopłata Gotówki {currCode}):</span>
               </label>
               <span className="text-[11px] text-slate-400 font-mono">
-                Wolna gotówka: <strong className="text-white">{portfolio.cashPln.toLocaleString('pl-PL')} PLN</strong>
+                Wolna gotówka: <strong className="text-white">{SettingsService.formatMoney(portfolio.cashPln, currency, usdPlnRate)}</strong>
               </span>
             </div>
             <input
               type="number"
               min="0"
-              step="500"
+              step="100"
               value={addCashPln}
               onChange={(e) => setAddCashPln(Math.max(0, parseFloat(e.target.value) || 0))}
-              placeholder="0 (wpisz kwotę dopłaty w PLN)"
+              placeholder={`0 (wpisz kwotę dopłaty w ${currCode})`}
+              title={`Kwota dodatkowej gotówki w ${currCode} do wpłacenia do portfela`}
               className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-1.5 text-white font-mono focus:outline-none focus:border-emerald-500"
             />
           </div>
@@ -719,6 +728,7 @@ export const EditPortfolioModal: React.FC<EditPortfolioModalProps> = ({
             <button
               type="button"
               onClick={handleReset}
+              title="Zresetuj stan portfela do kapitału początkowego i zamknij otwarte pozycje"
               className="flex-1 py-2 rounded-xl bg-amber-950/60 hover:bg-amber-900/60 text-amber-300 border border-amber-800/60 font-semibold cursor-pointer flex items-center justify-center gap-1.5 text-xs transition-colors"
             >
               <RotateCcw className="w-3.5 h-3.5 text-amber-400" />
@@ -728,6 +738,7 @@ export const EditPortfolioModal: React.FC<EditPortfolioModalProps> = ({
             <button
               type="button"
               onClick={handleDelete}
+              title="Bezpowrotnie usuń ten portfel wraz z jego historią"
               className="flex-1 py-2 rounded-xl bg-rose-950/60 hover:bg-rose-900/60 text-rose-300 border border-rose-800/60 font-semibold cursor-pointer flex items-center justify-center gap-1.5 text-xs transition-colors"
             >
               <Trash2 className="w-3.5 h-3.5 text-rose-400" />
@@ -740,12 +751,14 @@ export const EditPortfolioModal: React.FC<EditPortfolioModalProps> = ({
             <button
               type="button"
               onClick={onClose}
+              title="Anuluj wprowadzone zmiany"
               className="flex-1 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold cursor-pointer text-xs transition-colors"
             >
               Anuluj
             </button>
             <button
               type="submit"
+              title="Zapisz ustawienia strategii i zapisz na serwerze"
               className="flex-1 py-2.5 rounded-xl bg-gradient-to-r from-cyan-600 via-teal-600 to-emerald-600 hover:from-cyan-500 hover:to-emerald-500 text-white font-bold transition-all shadow-md shadow-cyan-950/40 cursor-pointer text-xs"
             >
               Zapisz Zmiany Strategii

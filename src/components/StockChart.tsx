@@ -1,17 +1,47 @@
-import React, { useState } from 'react';
-import { StockQuote, HistoricalBar } from '../types/stock';
-import { TrendingUp, BarChart2, Activity } from 'lucide-react';
+import React, { useState, useMemo } from 'react';
+import { StockQuote, HistoricalBar, AppCurrency } from '../types/stock';
+import { SettingsService } from '../services/settingsService';
+import { BarChart2, Activity } from 'lucide-react';
 
 interface StockChartProps {
   stock: StockQuote;
   height?: number;
+  currency?: AppCurrency;
+  usdPlnRate?: number;
 }
 
-export const StockChart: React.FC<StockChartProps> = ({ stock, height = 280 }) => {
+export const StockChart: React.FC<StockChartProps> = ({
+  stock,
+  height = 280,
+  currency = 'PLN',
+  usdPlnRate = 3.97
+}) => {
   const [chartType, setChartType] = useState<'candlestick' | 'line'>('candlestick');
   const [hoveredBar, setHoveredBar] = useState<HistoricalBar | null>(null);
 
-  const history = stock.history && stock.history.length > 0 ? stock.history : [];
+  const history = useMemo(() => {
+    const raw = stock.history && stock.history.length > 0 ? stock.history.map(b => ({ ...b })) : [];
+    if (raw.length === 0) return [];
+    const todayIso = new Date().toLocaleDateString('en-CA', { timeZone: 'Europe/Warsaw' });
+    const cleanCurr = Number(stock.price.toFixed(2));
+    const last = raw[raw.length - 1];
+    if (last.date === todayIso) {
+      last.close = cleanCurr;
+      last.high = Number(Math.max(last.high, stock.high || cleanCurr, cleanCurr).toFixed(2));
+      last.low = Number(Math.min(last.low, stock.low || cleanCurr, cleanCurr).toFixed(2));
+    } else {
+      raw.push({
+        date: todayIso,
+        open: Number((last.close || stock.open || cleanCurr).toFixed(2)),
+        high: Number(Math.max(last.close || cleanCurr, stock.high || cleanCurr, cleanCurr).toFixed(2)),
+        low: Number(Math.min(last.close || cleanCurr, stock.low || cleanCurr, cleanCurr).toFixed(2)),
+        close: cleanCurr,
+        volume: stock.volume || last.volume || 15000
+      });
+    }
+    return raw;
+  }, [stock.history, stock.price, stock.high, stock.low, stock.open, stock.volume]);
+
   if (history.length === 0) {
     return (
       <div className="flex items-center justify-center h-48 bg-slate-950/40 rounded-xl text-slate-500 text-xs">
@@ -19,6 +49,9 @@ export const StockChart: React.FC<StockChartProps> = ({ stock, height = 280 }) =
       </div>
     );
   }
+
+  const fmtMoney = (valPln: number) => SettingsService.formatMoney(valPln, currency, usdPlnRate, 2);
+  const currSymbol = SettingsService.getCurrencySymbol(currency);
 
   // Calculate scales
   const prices = history.flatMap(b => [b.high, b.low]);
@@ -49,7 +82,7 @@ export const StockChart: React.FC<StockChartProps> = ({ stock, height = 280 }) =
           <div>
             <div className="flex items-center gap-2">
               <span className="font-bold text-base text-white">{stock.cleanSymbol}</span>
-              <span className="text-xs text-slate-400 font-mono font-medium">{stock.price.toFixed(2)} PLN</span>
+              <span className="text-xs text-slate-400 font-mono font-medium">{fmtMoney(stock.price)}</span>
               <span className={`text-xs font-semibold font-mono ${stock.change >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
                 {stock.change >= 0 ? '+' : ''}{stock.changePercent.toFixed(2)}%
               </span>
@@ -63,20 +96,20 @@ export const StockChart: React.FC<StockChartProps> = ({ stock, height = 280 }) =
           {hoveredBar ? (
             <div className="flex items-center gap-2 bg-slate-900 px-2.5 py-1 rounded-lg border border-slate-700 font-mono text-[11px]">
               <span className="text-slate-400">{hoveredBar.date}:</span>
-              <span>O: {hoveredBar.open.toFixed(2)}</span>
-              <span className="text-emerald-400">H: {hoveredBar.high.toFixed(2)}</span>
-              <span className="text-rose-400">L: {hoveredBar.low.toFixed(2)}</span>
-              <span className="text-white font-bold">C: {hoveredBar.close.toFixed(2)}</span>
+              <span>O: {fmtMoney(hoveredBar.open)}</span>
+              <span className="text-emerald-400">H: {fmtMoney(hoveredBar.high)}</span>
+              <span className="text-rose-400">L: {fmtMoney(hoveredBar.low)}</span>
+              <span className="text-white font-bold">C: {fmtMoney(hoveredBar.close)}</span>
             </div>
           ) : (
             <div className="flex items-center gap-2 text-slate-400 text-[11px]">
               <span className="flex items-center gap-1">
                 <span className="w-2 h-2 rounded-full bg-amber-400 inline-block"></span>
-                <span>SMA50: {stock.sma50.toFixed(2)}</span>
+                <span>SMA50: {fmtMoney(stock.sma50)}</span>
               </span>
               <span className="flex items-center gap-1">
                 <span className="w-2 h-2 rounded-full bg-indigo-400 inline-block"></span>
-                <span>SMA200: {stock.sma200.toFixed(2)}</span>
+                <span>SMA200: {fmtMoney(stock.sma200)}</span>
               </span>
             </div>
           )}
@@ -115,13 +148,13 @@ export const StockChart: React.FC<StockChartProps> = ({ stock, height = 280 }) =
 
           {/* Price axis text */}
           <text x="695" y="18" fill="#64748b" fontSize="10" textAnchor="end" fontFamily="monospace">
-            {maxPrice.toFixed(2)} zł
+            {SettingsService.convertFromPln(maxPrice, currency, usdPlnRate).toFixed(2)} {currSymbol}
           </text>
           <text x="695" y={chartHeight / 2 - 4} fill="#64748b" fontSize="10" textAnchor="end" fontFamily="monospace">
-            {((maxPrice + minPrice) / 2).toFixed(2)} zł
+            {SettingsService.convertFromPln((maxPrice + minPrice) / 2, currency, usdPlnRate).toFixed(2)} {currSymbol}
           </text>
           <text x="695" y={chartHeight - 6} fill="#64748b" fontSize="10" textAnchor="end" fontFamily="monospace">
-            {minPrice.toFixed(2)} zł
+            {SettingsService.convertFromPln(minPrice, currency, usdPlnRate).toFixed(2)} {currSymbol}
           </text>
 
           {/* Volume sub-chart base */}

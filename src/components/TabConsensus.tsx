@@ -1,13 +1,13 @@
 import React, { useState, useMemo, useRef } from 'react';
-import { StockQuote, StockConsensus, PortfolioStrategy, TradeRecord, StockMarket } from '../types/stock';
+import { StockQuote, PortfolioStrategy, TradeRecord, StockMarket, AppCurrency } from '../types/stock';
 import { StooqService } from '../services/stooqService';
 import { PortfolioService } from '../services/portfolioService';
 import { TelegramService } from '../services/telegramService';
 import { MarketSessionService } from '../services/marketSessionService';
+import { SettingsService } from '../services/settingsService';
 import { CandlestickRecharts } from './CandlestickRecharts';
 import { AddNewStockModal } from './AddNewStockModal';
 import {
-  TrendingUp,
   Send,
   CheckCircle2,
   Zap,
@@ -17,12 +17,9 @@ import {
   ChevronRight,
   PlusCircle,
   ArrowUpDown,
-  HelpCircle,
-  ShieldAlert
+  Layers
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
-
-import { Layers } from 'lucide-react';
 
 interface TabConsensusProps {
   stocks: StockQuote[];
@@ -35,6 +32,8 @@ interface TabConsensusProps {
   onNavigateToCalculator: (symbol: string) => void;
   onSwitchToPortfolios?: () => void;
   onStockAdded: (stock: StockQuote) => void;
+  currency?: AppCurrency;
+  usdPlnRate?: number;
 }
 
 export const TabConsensus: React.FC<TabConsensusProps> = ({
@@ -46,8 +45,12 @@ export const TabConsensus: React.FC<TabConsensusProps> = ({
   onTradesUpdate,
   onNavigateToCalculator,
   onSwitchToPortfolios,
-  onStockAdded
+  onStockAdded,
+  currency = 'PLN',
+  usdPlnRate = 3.97
 }) => {
+  const fmtMoney = (valPln: number, dec = 2) => SettingsService.formatMoney(valPln, currency, usdPlnRate, dec);
+  const currCode = SettingsService.getCurrencyCode(currency);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [isSendingTelegram, setIsSendingTelegram] = useState(false);
   const [isAddStockOpen, setIsAddStockOpen] = useState(false);
@@ -208,6 +211,7 @@ export const TabConsensus: React.FC<TabConsensusProps> = ({
           {onSwitchToPortfolios && (
             <button
               onClick={onSwitchToPortfolios}
+              title="Przejdź do zakładki Portfele i otwartych pozycji"
               className="px-2.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold shrink-0 transition-colors text-[10px] cursor-pointer shadow-md"
             >
               Zobacz w Portfelu →
@@ -233,6 +237,7 @@ export const TabConsensus: React.FC<TabConsensusProps> = ({
                     }
                   }
                 }}
+                title={m === 'ALL' ? 'Pokaż wszystkie segmenty rynku' : `Filtruj walory z segmentu ${m}`}
                 className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all shrink-0 cursor-pointer ${
                   marketFilter === m
                     ? 'bg-emerald-600 text-white shadow-sm shadow-emerald-950/40'
@@ -279,7 +284,7 @@ export const TabConsensus: React.FC<TabConsensusProps> = ({
                 <button
                   key={stock.symbol}
                   onClick={() => onSelectSymbol(stock.symbol)}
-                  title={`${stock.cleanSymbol} (${stock.name}) • Rynek: ${stock.market} • Kurs: ${stock.price.toFixed(2)} PLN (${stock.changePercent >= 0 ? '+' : ''}${stock.changePercent.toFixed(2)}%)`}
+                  title={`${stock.cleanSymbol} (${stock.name}) • Rynek: ${stock.market} • Kurs: ${fmtMoney(stock.price)} (${stock.changePercent >= 0 ? '+' : ''}${stock.changePercent.toFixed(2)}%)`}
                   className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all border shrink-0 cursor-pointer ${
                     isSelected
                       ? 'bg-emerald-600 text-white border-emerald-500 shadow-md shadow-emerald-900/40 ring-1 ring-emerald-500'
@@ -295,7 +300,7 @@ export const TabConsensus: React.FC<TabConsensusProps> = ({
                     )}
                   </div>
                   <span className={`text-[10px] block ${stock.change >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                    {stock.price.toFixed(2)} zł ({stock.changePercent >= 0 ? '+' : ''}{stock.changePercent.toFixed(2)}%)
+                    {fmtMoney(stock.price)} ({stock.changePercent >= 0 ? '+' : ''}{stock.changePercent.toFixed(2)}%)
                   </span>
                 </button>
               );
@@ -321,7 +326,7 @@ export const TabConsensus: React.FC<TabConsensusProps> = ({
             >
               {stocks.map(s => (
                 <option key={s.symbol} value={s.symbol}>
-                  [{s.market}] {s.cleanSymbol} - {s.name} ({s.price.toFixed(2)} zł)
+                  [{s.market}] {s.cleanSymbol} - {s.name} ({fmtMoney(s.price)})
                 </option>
               ))}
             </select>
@@ -349,7 +354,7 @@ export const TabConsensus: React.FC<TabConsensusProps> = ({
                       {currentStock.trendScore ?? 75}/100
                     </span>
                   </div>
-                  <span className="text-[10px] text-slate-500 block mt-0.5">SMA50: {currentStock.sma50} zł • RSI: {currentStock.rsi14}</span>
+                  <span className="text-[10px] text-slate-500 block mt-0.5">SMA50: {fmtMoney(currentStock.sma50)} • RSI: {currentStock.rsi14}</span>
                 </div>
 
                 {/* 2. Candlestick Pattern */}
@@ -375,7 +380,7 @@ export const TabConsensus: React.FC<TabConsensusProps> = ({
                       {currentStock.analystRecommendation || 'KUPUJ (BUY)'}
                     </span>
                     <span className="text-xs font-mono font-bold text-white">
-                      Cel: {currentStock.analystTargetPrice ? `${currentStock.analystTargetPrice} zł` : '—'}
+                      Cel: {currentStock.analystTargetPrice ? fmtMoney(currentStock.analystTargetPrice) : '—'}
                     </span>
                   </div>
                   <span className="text-[10px] text-slate-500 block mt-0.5">Konsensus analityków i wycen rynkowych</span>
@@ -384,7 +389,7 @@ export const TabConsensus: React.FC<TabConsensusProps> = ({
             </div>
 
             {/* Recharts Candlestick Chart with Stooq Historical OHLC */}
-            <CandlestickRecharts stock={currentStock} height={340} />
+            <CandlestickRecharts stock={currentStock} height={340} currency={currency} usdPlnRate={usdPlnRate} />
 
             {/* Execution Levels Card (Entry, SL, Multi-TP 33/33/34) with tooltips */}
             <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-6 shadow-xl">
@@ -394,13 +399,13 @@ export const TabConsensus: React.FC<TabConsensusProps> = ({
                     <Zap className="w-4 h-4 text-amber-400" />
                     <span>Rekomendowane Poziomy Wejścia & Multi-TP (33/33/34)</span>
                   </h3>
-                  <p className="text-xs text-slate-400">Algorytmiczne cele cenowe i poziomy egzekucji dla {currentStock.symbol}</p>
+                  <p className="text-xs text-slate-400">Algorytmiczne cele cenowe i poziomy egzekucji dla {currentStock.symbol} ({currCode})</p>
                 </div>
 
                 <div className="flex items-center gap-2">
                   <button
                     onClick={() => onNavigateToCalculator(currentStock.symbol)}
-                    title="Przejdź do kalkulatora wielkości pozycji w PLN"
+                    title={`Przejdź do kalkulatora wielkości pozycji w ${currCode}`}
                     className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-300 border border-slate-700 transition-colors cursor-pointer"
                   >
                     <Calculator className="w-3.5 h-3.5 text-yellow-400" />
@@ -417,7 +422,7 @@ export const TabConsensus: React.FC<TabConsensusProps> = ({
                 >
                   <span className="text-[10px] text-slate-400 block">CENA WEJŚCIA</span>
                   <span className="text-base font-black text-white font-mono mt-0.5 block">
-                    {consensus.entryPrice.toFixed(2)} zł
+                    {fmtMoney(consensus.entryPrice)}
                   </span>
                   <span className="text-[10px] text-slate-500 font-mono">Aktualny kurs rynkowy</span>
                 </div>
@@ -428,7 +433,7 @@ export const TabConsensus: React.FC<TabConsensusProps> = ({
                 >
                   <span className="text-[10px] text-rose-300 font-semibold block">STOP LOSS</span>
                   <span className="text-base font-black text-rose-400 font-mono mt-0.5 block">
-                    {consensus.stopLoss.toFixed(2)} zł
+                    {fmtMoney(consensus.stopLoss)}
                   </span>
                   <span className="text-[10px] text-rose-500 font-mono">-{consensus.stopLossPercent}%</span>
                 </div>
@@ -439,7 +444,7 @@ export const TabConsensus: React.FC<TabConsensusProps> = ({
                 >
                   <span className="text-[10px] text-emerald-300 font-semibold block">TP1 (33% wolumenu)</span>
                   <span className="text-base font-black text-emerald-400 font-mono mt-0.5 block">
-                    {consensus.tp1.toFixed(2)} zł
+                    {fmtMoney(consensus.tp1)}
                   </span>
                   <span className="text-[10px] text-emerald-500 font-mono">+{consensus.tp1Percent}%</span>
                 </div>
@@ -450,7 +455,7 @@ export const TabConsensus: React.FC<TabConsensusProps> = ({
                 >
                   <span className="text-[10px] text-emerald-300 font-semibold block">TP2 (33% wolumenu)</span>
                   <span className="text-base font-black text-emerald-400 font-mono mt-0.5 block">
-                    {consensus.tp2.toFixed(2)} zł
+                    {fmtMoney(consensus.tp2)}
                   </span>
                   <span className="text-[10px] text-emerald-500 font-mono">+{consensus.tp2Percent}%</span>
                 </div>
@@ -461,20 +466,20 @@ export const TabConsensus: React.FC<TabConsensusProps> = ({
                 >
                   <span className="text-[10px] text-emerald-300 font-semibold block">TP3 (34% wolumenu)</span>
                   <span className="text-base font-black text-emerald-300 font-mono mt-0.5 block">
-                    {consensus.tp3.toFixed(2)} zł
+                    {fmtMoney(consensus.tp3)}
                   </span>
                   <span className="text-[10px] text-emerald-400 font-mono">+{consensus.tp3Percent}%</span>
                 </div>
               </div>
 
               {/* R:R Ratio info */}
-              <div className="mt-4 pt-3 border-t border-slate-800/80 flex items-center justify-between text-xs text-slate-400">
+              <div className="mt-4 pt-3 border-t border-slate-800/80 flex items-center justify-between text-xs text-slate-400 flex-wrap gap-2">
                 <span className="flex items-center gap-1.5" title="Stosunek oczekiwanego ważonego zysku z poziomów TP do ryzyka Stop Loss">
                   <span>Stosunek Zysku do Ryzyka (R:R):</span>
                   <b className="text-emerald-400 font-mono">1 : {consensus.riskRewardRatio}</b>
                 </span>
                 <span className="text-[11px] text-slate-500">
-                  Po osiągnięciu TP1 zlecenie SL automatycznie przesuwa się na Break-Even ({consensus.entryPrice.toFixed(2)} zł).
+                  Po osiągnięciu TP1 zlecenie SL automatycznie przesuwa się na Break-Even ({fmtMoney(consensus.entryPrice)}).
                 </span>
               </div>
             </div>
@@ -523,7 +528,10 @@ export const TabConsensus: React.FC<TabConsensusProps> = ({
 
                 {/* Verdict Badge */}
                 <div className="inline-block mb-3">
-                  <span className={`px-4 py-1.5 rounded-full text-xs font-black tracking-wide border shadow-sm ${getVerdictBadge(consensus.verdict)}`}>
+                  <span
+                    title={`Zagregowany werdykt 10 algorytmów: ${consensus.verdict} (${consensus.overallScore}%)`}
+                    className={`px-4 py-1.5 rounded-full text-xs font-black tracking-wide border shadow-sm ${getVerdictBadge(consensus.verdict)}`}
+                  >
                     {consensus.verdict}
                   </span>
                 </div>
@@ -557,7 +565,7 @@ export const TabConsensus: React.FC<TabConsensusProps> = ({
                       <span>Parametry Zlecenia</span>
                     </span>
                     <span className="text-[10px] text-slate-400 font-mono">
-                      {currentStock.cleanSymbol} • {consensus.entryPrice.toFixed(2)} zł
+                      {currentStock.cleanSymbol} • {fmtMoney(consensus.entryPrice)}
                     </span>
                   </div>
 
@@ -584,7 +592,7 @@ export const TabConsensus: React.FC<TabConsensusProps> = ({
                     >
                       {portfolios.map(p => (
                         <option key={p.id} value={p.id}>
-                          {p.name} (Gotówka: {p.cashPln.toLocaleString('pl-PL')} zł)
+                          {p.name} (Gotówka: {fmtMoney(p.cashPln)})
                         </option>
                       ))}
                     </select>
@@ -606,6 +614,7 @@ export const TabConsensus: React.FC<TabConsensusProps> = ({
                         min="1"
                         value={activeShares}
                         onChange={(e) => setCustomSharesInput(Math.max(1, parseFloat(e.target.value) || 1))}
+                        title="Wpisz liczbę jednostek do zakupu"
                         className="w-full bg-slate-900 border border-slate-700 rounded-xl px-2.5 py-1.5 text-xs font-mono font-bold text-white focus:outline-none focus:border-emerald-500"
                       />
                       {customSharesInput > 0 && customSharesInput !== defaultShares && (
@@ -624,12 +633,12 @@ export const TabConsensus: React.FC<TabConsensusProps> = ({
                   <div className="p-2.5 rounded-xl bg-slate-900/90 border border-slate-800 space-y-1 font-mono text-[11px]">
                     <div className="flex items-center justify-between">
                       <span className="text-slate-400 font-sans">Wartość Transakcji:</span>
-                      <span className="font-bold text-emerald-400">{totalCostPln.toLocaleString('pl-PL')} PLN</span>
+                      <span className="font-bold text-emerald-400">{fmtMoney(totalCostPln)}</span>
                     </div>
                     <div className="flex items-center justify-between text-[10px]">
                       <span className="text-slate-500 font-sans">Dostępna Gotówka:</span>
                       <span className={targetPortfolio && targetPortfolio.cashPln >= totalCostPln ? 'text-slate-300' : 'text-rose-400 font-bold'}>
-                        {targetPortfolio ? targetPortfolio.cashPln.toLocaleString('pl-PL') : '0'} PLN
+                        {targetPortfolio ? fmtMoney(targetPortfolio.cashPln) : fmtMoney(0)}
                       </span>
                     </div>
                     {targetPortfolio && targetPortfolio.cashPln < totalCostPln && (
@@ -647,7 +656,7 @@ export const TabConsensus: React.FC<TabConsensusProps> = ({
                       disabled={Boolean(targetPortfolio && targetPortfolio.cashPln < totalCostPln)}
                       title={
                         targetPortfolio && targetPortfolio.cashPln >= totalCostPln
-                          ? `Zrealizuj kupno ${activeShares} ${unit} ${currentStock.cleanSymbol} za kwotę ${totalCostPln.toLocaleString('pl-PL')} PLN w portfelu "${targetPortfolio.name}"`
+                          ? `Zrealizuj kupno ${activeShares} ${unit} ${currentStock.cleanSymbol} za kwotę ${fmtMoney(totalCostPln)} w portfelu "${targetPortfolio.name}"`
                           : 'Niewystarczająca ilość wolnej gotówki w wybranym portfelu'
                       }
                       className={`w-full py-3 px-3.5 rounded-xl font-bold text-xs shadow-lg flex items-center justify-center gap-2 transition-all cursor-pointer ${
@@ -658,7 +667,7 @@ export const TabConsensus: React.FC<TabConsensusProps> = ({
                     >
                       <Zap className="w-4 h-4 text-amber-300" />
                       <span className="truncate">
-                        Kup {activeShares} {unit} {currentStock.cleanSymbol} ({totalCostPln.toLocaleString('pl-PL')} PLN)
+                        Kup {activeShares} {unit} {currentStock.cleanSymbol} ({fmtMoney(totalCostPln)})
                       </span>
                     </button>
 

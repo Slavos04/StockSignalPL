@@ -3,12 +3,19 @@ import { INITIAL_STOCKS, INITIAL_SIGNAL_SOURCES } from '../data/initialData';
 import { enrichStockSignalsPure } from '../utils/stockSignals';
 import { formatWarsawTime } from '../utils/dateTime';
 
+import { SettingsService } from './settingsService';
+
 const STOCKS_STORAGE_KEY = 'stocksignalpl_stocks_v1';
 const SOURCES_STORAGE_KEY = 'stocksignalpl_sources_v1';
 
 export class StooqService {
   private static stocks: StockQuote[] = [];
   private static sources: SignalSource[] = [];
+  private static usdPlnRate: number = 3.97;
+
+  public static getUsdPlnRate(): number {
+    return this.usdPlnRate;
+  }
 
   public static initialize(): void {
     const savedStocks = localStorage.getItem(STOCKS_STORAGE_KEY);
@@ -220,6 +227,10 @@ export class StooqService {
       const res = await fetch(`/api/market-quotes?symbols=${encodeURIComponent(symbol)}`);
       if (res.ok) {
         const data = await res.json();
+        if (typeof data.usdPlnRate === 'number' && data.usdPlnRate > 0) {
+          this.usdPlnRate = data.usdPlnRate;
+          SettingsService.updateUsdPlnRate(data.usdPlnRate);
+        }
         if (data.quotes && data.quotes.length > 0) {
           const q = data.quotes[0];
           this.applyRealQuote(q);
@@ -261,6 +272,10 @@ export class StooqService {
       const res = await fetch('/api/market-quotes');
       if (res.ok) {
         const data = await res.json();
+        if (typeof data.usdPlnRate === 'number' && data.usdPlnRate > 0) {
+          this.usdPlnRate = data.usdPlnRate;
+          SettingsService.updateUsdPlnRate(data.usdPlnRate);
+        }
         if (data.quotes && Array.isArray(data.quotes)) {
           data.quotes.forEach((realQuote: any) => {
             const upd = this.applyRealQuote(realQuote);
@@ -310,6 +325,26 @@ export class StooqService {
 
     if (delta !== 0) {
       stock.sparkline = [...stock.sparkline.slice(1), stock.price];
+    }
+
+    // Aktualizuj dzisiejszy punkt historii OHLC tak, aby wykresy wielodniowe i miesięczne kończyły się bieżącym kursem
+    if (Array.isArray(stock.history) && stock.history.length > 0) {
+      const todayIso = new Date().toLocaleDateString('en-CA', { timeZone: 'Europe/Warsaw' });
+      const lastBar = stock.history[stock.history.length - 1];
+      if (lastBar.date === todayIso) {
+        lastBar.close = newPrice;
+        lastBar.high = Number(Math.max(lastBar.high, newPrice).toFixed(2));
+        lastBar.low = Number(Math.min(lastBar.low, newPrice).toFixed(2));
+      } else {
+        stock.history.push({
+          date: todayIso,
+          open: stock.open || lastBar.close || newPrice,
+          high: Number(Math.max(stock.high || newPrice, newPrice).toFixed(2)),
+          low: Number(Math.min(stock.low || newPrice, newPrice).toFixed(2)),
+          close: newPrice,
+          volume: stock.volume || lastBar.volume || 10000
+        });
+      }
     }
 
     // Refresh technical indicators based on real prices

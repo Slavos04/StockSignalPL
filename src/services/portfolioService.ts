@@ -47,6 +47,7 @@ export class PortfolioService {
       this.portfolios = [...INITIAL_PORTFOLIOS];
       this.persistPortfoliosLocalOnly();
     }
+    this.portfolios.forEach(p => this.recomputePortfolioMetrics(p));
 
     const savedT = localStorage.getItem(TRADES_STORAGE_KEY);
     if (savedT) {
@@ -62,6 +63,27 @@ export class PortfolioService {
     } else {
       this.trades = [...INITIAL_TRADES];
       this.persistTradesLocalOnly();
+    }
+  }
+
+  public static recomputePortfolioMetrics(portfolio: PortfolioStrategy): void {
+    const positions = portfolio.activePositions || [];
+    const openVal = positions.reduce((sum, pos) => {
+      const shares = Number(pos.shares) || 0;
+      const cur = Number(pos.currentPrice) || Number(pos.entryPrice) || 0;
+      const entry = Number(pos.entryPrice) || cur;
+      if (pos.positionSide === 'SHORT') {
+        return sum + Math.max(0, entry * shares + (entry - cur) * shares);
+      }
+      return sum + shares * cur;
+    }, 0);
+
+    portfolio.cashPln = Number((Number(portfolio.cashPln) || 0).toFixed(2));
+    portfolio.allocatedPln = Number(openVal.toFixed(2));
+    portfolio.currentBalance = Number((portfolio.cashPln + portfolio.allocatedPln).toFixed(2));
+    if (portfolio.initialCapital > 0) {
+      portfolio.totalProfitPln = Number((portfolio.currentBalance - portfolio.initialCapital).toFixed(2));
+      portfolio.totalProfitPercent = Number(((portfolio.totalProfitPln / portfolio.initialCapital) * 100).toFixed(2));
     }
   }
 
@@ -122,7 +144,10 @@ export class PortfolioService {
       if (res.ok) {
         const data = await res.json();
         if (data.success && Array.isArray(data.portfolios) && data.portfolios.length > 0) {
-          this.portfolios = data.portfolios;
+          this.portfolios = data.portfolios.map((p: PortfolioStrategy) => {
+            this.recomputePortfolioMetrics(p);
+            return p;
+          });
           this.persistPortfoliosLocalOnly();
           return this.portfolios;
         }
@@ -204,18 +229,7 @@ export class PortfolioService {
       });
 
       if (portChanged) {
-        const openVal = (p.activePositions || []).reduce((sum, pos) => {
-          if (pos.positionSide === 'SHORT') {
-            return sum + Math.max(0, pos.entryPrice * pos.shares + (pos.entryPrice - pos.currentPrice) * pos.shares);
-          }
-          return sum + (pos.shares * pos.currentPrice);
-        }, 0);
-        p.allocatedPln = Number(openVal.toFixed(2));
-        p.currentBalance = Number(((p.cashPln || 0) + p.allocatedPln).toFixed(2));
-        if (p.initialCapital > 0) {
-          p.totalProfitPln = Number((p.currentBalance - p.initialCapital).toFixed(2));
-          p.totalProfitPercent = Number(((p.totalProfitPln / p.initialCapital) * 100).toFixed(2));
-        }
+        this.recomputePortfolioMetrics(p);
         anyUpdated = true;
       }
     });
@@ -370,11 +384,11 @@ export class PortfolioService {
     if (updates.anchorLeaderLagMinutes !== undefined) portfolio.anchorLeaderLagMinutes = updates.anchorLeaderLagMinutes;
 
     if (updates.addCashPln && updates.addCashPln > 0) {
-      portfolio.cashPln += updates.addCashPln;
-      portfolio.initialCapital += updates.addCashPln;
-      portfolio.currentBalance += updates.addCashPln;
+      portfolio.cashPln = Number((portfolio.cashPln + updates.addCashPln).toFixed(2));
+      portfolio.initialCapital = Number((portfolio.initialCapital + updates.addCashPln).toFixed(2));
     }
 
+    this.recomputePortfolioMetrics(portfolio);
     this.savePortfolios();
     return {
       success: true,
@@ -451,21 +465,51 @@ export class PortfolioService {
 
   /**
    * Wykonanie Smart Rebalance
-   * Równoważy wagi portfela, zamyka część zysków, optymalizuje gotówkę
+   * Równoważy wagi portfela proporcjonalnie redukując nadmiernie rozbudowane pozycje (jeśli brakuje bufora 20% gotówki),
+   * zachowując 100% zgodności rachunkowej: gotówka + otwarte pozycje = wartość całkowita portfela.
    */
   public static triggerSmartRebalance(portfolioId: string): { success: boolean; message: string; rebalancedCash: number } {
     const p = this.getPortfolio(portfolioId);
     if (!p) return { success: false, message: 'Nie znaleziono portfela', rebalancedCash: 0 };
 
-    // Symulacja optymalizacji wag
-    const targetCashRatio = 0.20; // 20% bufor gotówki
+    this.recomputePortfolioMetrics(p);
     const totalVal = p.currentBalance;
-    const targetCash = totalVal * targetCashRatio;
-    const oldCash = p.cashPln;
-    p.cashPln = Math.round(targetCash);
-    p.allocatedPln = Math.round(totalVal - p.cashPln);
+    const targetCash = totalVal * 0.20;
+    let freedCash = 0;
+    let realizedPnl = 0;
 
-    // Zapisz wpis w dzienniku
+    if (p.cashPln < targetCash && p.activePositions.length > 0) {
+      const cashNeeded = targetCash - p.cashPln;
+      const trimRatio = Math.min(0.45, cashNeeded / Math.max(1, p.allocatedPln));
+
+      p.activePositions = p.activePositions.filter(pos => {
+        if (pos.shares <= 1) return true;
+        const sharesToSell = Math.max(1, Math.floor(pos.shares * trimRatio));
+        if (sharesToSell <= 0 || sharesToSell >= pos.shares) return true;
+
+        const isShort = pos.positionSide === 'SHORT';
+        const pnlPart = isShort
+          ? Number(((pos.entryPrice - pos.currentPrice) * sharesToSell).toFixed(2))
+          : Number(((pos.currentPrice - pos.entryPrice) * sharesToSell).toFixed(2));
+        const returned = isShort
+          ? Number(Math.max(0, pos.entryPrice * sharesToSell + pnlPart).toFixed(2))
+          : Number((sharesToSell * pos.currentPrice).toFixed(2));
+
+        pos.shares -= sharesToSell;
+        pos.pnlPln = isShort
+          ? Number(((pos.entryPrice - pos.currentPrice) * pos.shares).toFixed(2))
+          : Number(((pos.currentPrice - pos.entryPrice) * pos.shares).toFixed(2));
+
+        freedCash += returned;
+        realizedPnl += pnlPart;
+        return pos.shares > 0;
+      });
+
+      p.cashPln = Number((p.cashPln + freedCash).toFixed(2));
+    }
+
+    this.recomputePortfolioMetrics(p);
+
     const newTrade: TradeRecord = {
       id: `tr_${Date.now()}`,
       date: formatWarsawDateTime(),
@@ -473,12 +517,14 @@ export class PortfolioService {
       name: `Smart Rebalancing (${p.name})`,
       type: 'SPRZEDAŻ',
       pricePln: 1.0,
-      shares: Math.abs(Math.round(p.cashPln - oldCash)),
-      totalPln: Math.abs(Math.round(p.cashPln - oldCash)),
-      resultPln: 350,
-      resultPercent: 1.4,
+      shares: Math.round(freedCash),
+      totalPln: Number(freedCash.toFixed(2)),
+      resultPln: Number(realizedPnl.toFixed(2)),
+      resultPercent: p.initialCapital > 0 ? Number(((realizedPnl / p.initialCapital) * 100).toFixed(2)) : 0,
       strategyId: p.id,
-      reason: 'Algorytmiczny Smart Rebalance - realizacja zysków i przywrócenie wag docelowych',
+      reason: freedCash > 0
+        ? `Algorytmiczny Smart Rebalance: przycięcie nadmiernych wag i uwolnienie ${freedCash.toFixed(2)} PLN do rezerwy gotówkowej`
+        : 'Algorytmiczny Smart Rebalance: weryfikacja wag portfela (rezerwa gotówki powyżej 20%)',
       status: 'REBALANCE'
     };
 
@@ -488,7 +534,7 @@ export class PortfolioService {
 
     return {
       success: true,
-      message: `Portfel "${p.name}" pomyślnie zrebalansowany! Zabezpieczono ${p.cashPln.toLocaleString('pl-PL')} PLN w gotówce.`,
+      message: `Portfel "${p.name}" pomyślnie zrebalansowany! Gotówka: ${p.cashPln.toLocaleString('pl-PL')} PLN.`,
       rebalancedCash: p.cashPln
     };
   }
@@ -623,8 +669,8 @@ export class PortfolioService {
       };
     }
 
-    portfolio.cashPln -= totalPln;
-    portfolio.allocatedPln += totalPln;
+    portfolio.cashPln = Number((portfolio.cashPln - totalPln).toFixed(2));
+    portfolio.allocatedPln = Number((portfolio.allocatedPln + totalPln).toFixed(2));
 
     const isShort = positionSide === 'SHORT';
     const tp1 = isShort ? Number((entryPrice * 0.968).toFixed(2)) : Number((entryPrice * 1.032).toFixed(2));
@@ -688,6 +734,7 @@ export class PortfolioService {
     };
 
     this.trades.unshift(tradeLog);
+    this.recomputePortfolioMetrics(portfolio);
     this.savePortfolios();
     this.saveTrades(tradeLog);
 
@@ -726,8 +773,7 @@ export class PortfolioService {
     if (!portfolio) return { success: false, message: 'Nie znaleziono portfela' };
 
     const totalPln = Number((shares * entryPrice).toFixed(2));
-    portfolio.cashPln = Math.max(0, portfolio.cashPln - totalPln);
-    portfolio.allocatedPln += totalPln;
+    portfolio.cashPln = Math.max(0, Number((portfolio.cashPln - totalPln).toFixed(2)));
 
     const newPosition: PositionItem = {
       id: `pos_${Date.now()}_${stock.symbol}`,
@@ -751,6 +797,7 @@ export class PortfolioService {
 
     portfolio.activePositions.unshift(newPosition);
     portfolio.tradesCount += 1;
+    this.recomputePortfolioMetrics(portfolio);
 
     const trade: TradeRecord = {
       id: `tr_${Date.now()}_${stock.symbol}`,
@@ -794,12 +841,17 @@ export class PortfolioService {
       p.activePositions.forEach(pos => {
         const quote = stockQuotes.find(q => q.symbol === pos.ticker || q.cleanSymbol === pos.ticker);
         if (quote) {
-          // Zawsze aktualizuj bieżący kurs rynkowy i wynik PnL na żywo z ostatniego ticka
+          const isShort = pos.positionSide === 'SHORT';
           pos.currentPrice = quote.price;
-          pos.pnlPln = Number(((pos.currentPrice - pos.entryPrice) * pos.shares).toFixed(2));
-          pos.pnlPercent = Number((((pos.currentPrice - pos.entryPrice) / pos.entryPrice) * 100).toFixed(2));
+          pos.pnlPln = isShort
+            ? Number(((pos.entryPrice - pos.currentPrice) * pos.shares).toFixed(2))
+            : Number(((pos.currentPrice - pos.entryPrice) * pos.shares).toFixed(2));
+          pos.pnlPercent = pos.entryPrice > 0
+            ? isShort
+              ? Number((((pos.entryPrice - pos.currentPrice) / pos.entryPrice) * 100).toFixed(2))
+              : Number((((pos.currentPrice - pos.entryPrice) / pos.entryPrice) * 100).toFixed(2))
+            : 0;
 
-          // Na zamkniętym rynku brak realizacji automatycznych zleceń TP/SL
           const marketCheck = MarketSessionService.isMarketOpenForStock(quote, new Date(), forceTest);
           if (!marketCheck.isOpen) {
             remainingPositions.push(pos);
@@ -807,41 +859,61 @@ export class PortfolioService {
           }
 
           const timestamp = formatWarsawDateTime();
-          const hitTp1 = !pos.tp1Reached && pos.currentPrice >= pos.targetPrice1;
-          const hitTp2 = pos.tp1Reached && !pos.tp2Reached && pos.currentPrice >= pos.targetPrice2;
-          const isTp3 = pos.tp2Reached && !pos.tp3Reached && pos.currentPrice >= pos.targetPrice3;
-          const isSl = pos.currentPrice <= pos.stopLoss;
+          const hitTp1 = isShort
+            ? (!pos.tp1Reached && pos.currentPrice <= pos.targetPrice1)
+            : (!pos.tp1Reached && pos.currentPrice >= pos.targetPrice1);
+          const hitTp2 = isShort
+            ? (pos.tp1Reached && !pos.tp2Reached && pos.currentPrice <= pos.targetPrice2)
+            : (pos.tp1Reached && !pos.tp2Reached && pos.currentPrice >= pos.targetPrice2);
+          const isTp3 = isShort
+            ? (pos.tp2Reached && !pos.tp3Reached && pos.currentPrice <= pos.targetPrice3)
+            : (pos.tp2Reached && !pos.tp3Reached && pos.currentPrice >= pos.targetPrice3);
+          const isSl = isShort
+            ? (pos.currentPrice >= pos.stopLoss)
+            : (pos.currentPrice <= pos.stopLoss);
 
-          // 1. Osiągnięcie TP1 (33% wolumenu) -> Realizacja częściowa 33% i przesunięcie SL na Break-Even
           if (hitTp1 && pos.shares > 0) {
             pos.tp1Reached = true;
             pos.status = 'ZREALIZOWANO TP1';
-            pos.stopLoss = Math.max(pos.stopLoss, pos.entryPrice); // Break-even SL
+            pos.stopLoss = isShort ? Math.min(pos.stopLoss, pos.entryPrice) : Math.max(pos.stopLoss, pos.entryPrice);
 
             const soldShares = Math.min(pos.shares, Math.max(1, Math.floor(pos.shares * 0.33)));
             pos.shares = Math.max(0, pos.shares - soldShares);
-            const returnCash = Number((soldShares * pos.currentPrice).toFixed(2));
-            const pnlPart = Number(((pos.currentPrice - pos.entryPrice) * soldShares).toFixed(2));
+            const pnlPart = isShort
+              ? Number(((pos.entryPrice - pos.currentPrice) * soldShares).toFixed(2))
+              : Number(((pos.currentPrice - pos.entryPrice) * soldShares).toFixed(2));
+            const returnCash = isShort
+              ? Number(Math.max(0, pos.entryPrice * soldShares + pnlPart).toFixed(2))
+              : Number((soldShares * pos.currentPrice).toFixed(2));
 
             p.cashPln = Number((p.cashPln + returnCash).toFixed(2));
-            p.allocatedPln = Number(p.activePositions.reduce((s, item) => s + item.shares * item.currentPrice, 0).toFixed(2));
-            p.currentBalance = Number((p.cashPln + p.allocatedPln).toFixed(2));
-            p.totalProfitPln = Number((p.currentBalance - p.initialCapital).toFixed(2));
 
-            // Zapisz wpis w Dzienniku Tradera
+            this.addAutoPilotLog(p, {
+              id: `log_${Date.now()}_tp1_${pos.ticker}`,
+              timestamp,
+              ticker: pos.ticker,
+              action: 'SPRZEDAŻ_TP',
+              confidence: 100,
+              riskRewardRatio: 1.5,
+              reason: `Realizacja TP1 (33%): sprzedano ${soldShares} szt. po ${pos.currentPrice.toFixed(2)} zł (+${pnlPart.toFixed(2)} PLN). SL przestawiony na Break-Even.`,
+              portfolioId: p.id,
+              portfolioName: p.name
+            });
+
             const tradeLog: TradeRecord = {
               id: `tr_${Date.now()}_tp1_${pos.ticker}`,
               date: timestamp,
               ticker: pos.ticker,
               name: pos.name,
-              type: 'SPRZEDAŻ',
+              type: isShort ? 'ZAMKNIĘCIE_SHORT' : 'SPRZEDAŻ',
+              positionSide: pos.positionSide || 'LONG',
               pricePln: pos.currentPrice,
               shares: soldShares,
               totalPln: returnCash,
               resultPln: pnlPart,
-              resultPercent: Number((((pos.currentPrice - pos.entryPrice) / pos.entryPrice) * 100).toFixed(2)),
+              resultPercent: pos.pnlPercent,
               strategyId: p.id,
-              reason: `Auto-Pilot: Osiągnięto poziom TP1 (+3.2%). Realizacja 33% pozycji i przesunięcie SL na Break-Even (${pos.entryPrice.toFixed(2)} zł)`,
+              reason: `Auto-Pilot: Osiągnięto poziom TP1. Realizacja 33% pozycji i przesunięcie SL na Break-Even (${pos.entryPrice.toFixed(2)} zł)`,
               status: 'AUTO-PILOT'
             };
             this.trades.unshift(tradeLog);
@@ -868,33 +940,46 @@ export class PortfolioService {
             }
             if (pos.shares <= 0) return;
           } else if (hitTp2 && pos.shares > 0) {
-            // 2. Osiągnięcie TP2 (kolejne 33% wolumenu)
             pos.tp2Reached = true;
             pos.status = 'ZREALIZOWANO TP2';
 
             const soldShares = Math.min(pos.shares, Math.max(1, Math.floor(pos.shares * 0.50)));
             pos.shares = Math.max(0, pos.shares - soldShares);
-            const returnCash = Number((soldShares * pos.currentPrice).toFixed(2));
-            const pnlPart = Number(((pos.currentPrice - pos.entryPrice) * soldShares).toFixed(2));
+            const pnlPart = isShort
+              ? Number(((pos.entryPrice - pos.currentPrice) * soldShares).toFixed(2))
+              : Number(((pos.currentPrice - pos.entryPrice) * soldShares).toFixed(2));
+            const returnCash = isShort
+              ? Number(Math.max(0, pos.entryPrice * soldShares + pnlPart).toFixed(2))
+              : Number((soldShares * pos.currentPrice).toFixed(2));
 
             p.cashPln = Number((p.cashPln + returnCash).toFixed(2));
-            p.allocatedPln = Number(p.activePositions.reduce((s, item) => s + item.shares * item.currentPrice, 0).toFixed(2));
-            p.currentBalance = Number((p.cashPln + p.allocatedPln).toFixed(2));
-            p.totalProfitPln = Number((p.currentBalance - p.initialCapital).toFixed(2));
+
+            this.addAutoPilotLog(p, {
+              id: `log_${Date.now()}_tp2_${pos.ticker}`,
+              timestamp,
+              ticker: pos.ticker,
+              action: 'SPRZEDAŻ_TP',
+              confidence: 100,
+              riskRewardRatio: 2.4,
+              reason: `Realizacja TP2 (33%): sprzedano ${soldShares} szt. po ${pos.currentPrice.toFixed(2)} zł (+${pnlPart.toFixed(2)} PLN).`,
+              portfolioId: p.id,
+              portfolioName: p.name
+            });
 
             const tradeLog: TradeRecord = {
               id: `tr_${Date.now()}_tp2_${pos.ticker}`,
               date: timestamp,
               ticker: pos.ticker,
               name: pos.name,
-              type: 'SPRZEDAŻ',
+              type: isShort ? 'ZAMKNIĘCIE_SHORT' : 'SPRZEDAŻ',
+              positionSide: pos.positionSide || 'LONG',
               pricePln: pos.currentPrice,
               shares: soldShares,
               totalPln: returnCash,
               resultPln: pnlPart,
-              resultPercent: Number((((pos.currentPrice - pos.entryPrice) / pos.entryPrice) * 100).toFixed(2)),
+              resultPercent: pos.pnlPercent,
               strategyId: p.id,
-              reason: `Auto-Pilot: Osiągnięto poziom TP2 (+6.5%). Realizacja kolejnych 33% pozycji z zyskiem.`,
+              reason: `Auto-Pilot: Osiągnięto poziom TP2. Realizacja kolejnych 33% pozycji z zyskiem.`,
               status: 'AUTO-PILOT'
             };
             this.trades.unshift(tradeLog);
@@ -921,36 +1006,46 @@ export class PortfolioService {
             }
             if (pos.shares <= 0) return;
           } else if ((isTp3 || isSl) && pos.shares > 0) {
-            // 3. Osiągnięcie TP3 (+11.8%) lub STOP LOSS -> Pełne zamknięcie pozostałej pozycji
             changed = true;
             const remainingShares = pos.shares;
-            const returnCash = Number((remainingShares * pos.currentPrice).toFixed(2));
-            const pnlPart = Number(((pos.currentPrice - pos.entryPrice) * remainingShares).toFixed(2));
+            const pnlPart = isShort
+              ? Number(((pos.entryPrice - pos.currentPrice) * remainingShares).toFixed(2))
+              : Number(((pos.currentPrice - pos.entryPrice) * remainingShares).toFixed(2));
+            const returnCash = isShort
+              ? Number(Math.max(0, pos.entryPrice * remainingShares + pnlPart).toFixed(2))
+              : Number((remainingShares * pos.currentPrice).toFixed(2));
 
             p.cashPln = Number((p.cashPln + returnCash).toFixed(2));
-            p.allocatedPln = Number(
-              p.activePositions
-                .filter(item => item.id !== pos.id)
-                .reduce((s, item) => s + item.shares * item.currentPrice, 0)
-                .toFixed(2)
-            );
-            p.currentBalance = Number((p.cashPln + p.allocatedPln).toFixed(2));
-            p.totalProfitPln = Number((p.currentBalance - p.initialCapital).toFixed(2));
+
+            this.addAutoPilotLog(p, {
+              id: `log_${Date.now()}_${isTp3 ? 'tp3' : 'sl'}_${pos.ticker}`,
+              timestamp,
+              ticker: pos.ticker,
+              action: isTp3 ? 'SPRZEDAŻ_TP' : 'SPRZEDAŻ_SL',
+              confidence: 100,
+              riskRewardRatio: isTp3 ? 4.2 : 1,
+              reason: isTp3
+                ? `Pełna realizacja TP3: zamknięto ${remainingShares} szt. po ${pos.currentPrice.toFixed(2)} zł (+${pnlPart.toFixed(2)} PLN).`
+                : `Aktywacja Stop Loss (${pos.stopLoss.toFixed(2)} zł): zamknięto ${remainingShares} szt. (Wynik: ${pnlPart.toFixed(2)} PLN).`,
+              portfolioId: p.id,
+              portfolioName: p.name
+            });
 
             const tradeLog: TradeRecord = {
               id: `tr_${Date.now()}_close_${pos.ticker}`,
               date: timestamp,
               ticker: pos.ticker,
               name: pos.name,
-              type: 'SPRZEDAŻ',
+              type: isShort ? 'ZAMKNIĘCIE_SHORT' : 'SPRZEDAŻ',
+              positionSide: pos.positionSide || 'LONG',
               pricePln: pos.currentPrice,
               shares: remainingShares,
               totalPln: returnCash,
               resultPln: pnlPart,
-              resultPercent: Number((((pos.currentPrice - pos.entryPrice) / pos.entryPrice) * 100).toFixed(2)),
+              resultPercent: pos.pnlPercent,
               strategyId: p.id,
               reason: isTp3
-                ? `Auto-Pilot: Osiągnięto docelowe TP3 (+11.8%). Całkowita realizacja zysków z pozycji.`
+                ? `Auto-Pilot: Osiągnięto docelowe TP3. Całkowita realizacja zysków z pozycji.`
                 : `Auto-Pilot: Pozycja dotknęła poziomu Stop-Loss (${pos.stopLoss.toFixed(2)} zł). Automatyczne ucięcie strat.`,
               status: isTp3 ? 'ZYSK (TP)' : 'STRATA (SL)'
             };
@@ -993,6 +1088,7 @@ export class PortfolioService {
       });
 
       p.activePositions = remainingPositions;
+      this.recomputePortfolioMetrics(p);
     });
 
     if (changed) {

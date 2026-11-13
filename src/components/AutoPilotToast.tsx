@@ -1,28 +1,44 @@
 import React, { useEffect } from 'react';
-import { AutoPilotNotification } from '../types/stock';
-import { Bot, CheckCircle2, AlertTriangle, TrendingUp, X } from 'lucide-react';
+import { AutoPilotNotification, AppCurrency } from '../types/stock';
+import { SettingsService } from '../services/settingsService';
+import { Bot, X } from 'lucide-react';
 
 interface AutoPilotToastProps {
   notifications: AutoPilotNotification[];
   onDismiss: (id: string) => void;
+  currency?: AppCurrency;
+  usdPlnRate?: number;
 }
 
-export const AutoPilotToast: React.FC<AutoPilotToastProps> = ({ notifications, onDismiss }) => {
+export const AutoPilotToast: React.FC<AutoPilotToastProps> = ({
+  notifications,
+  onDismiss,
+  currency = 'PLN',
+  usdPlnRate = 3.97
+}) => {
   if (!notifications || notifications.length === 0) return null;
 
   return (
     <div className="fixed top-20 right-4 z-50 flex flex-col gap-3 max-w-sm w-full pointer-events-none select-none">
       {notifications.map((n) => (
-        <ToastItem key={n.id} notification={n} onDismiss={onDismiss} />
+        <ToastItem
+          key={n.id}
+          notification={n}
+          onDismiss={onDismiss}
+          currency={currency}
+          usdPlnRate={usdPlnRate}
+        />
       ))}
     </div>
   );
 };
 
-const ToastItem: React.FC<{ notification: AutoPilotNotification; onDismiss: (id: string) => void }> = ({
-  notification,
-  onDismiss
-}) => {
+const ToastItem: React.FC<{
+  notification: AutoPilotNotification;
+  onDismiss: (id: string) => void;
+  currency: AppCurrency;
+  usdPlnRate: number;
+}> = ({ notification, onDismiss, currency, usdPlnRate }) => {
   useEffect(() => {
     const timer = setTimeout(() => {
       onDismiss(notification.id);
@@ -33,6 +49,11 @@ const ToastItem: React.FC<{ notification: AutoPilotNotification; onDismiss: (id:
   const isBuy = notification.type === 'BUY';
   const isTp = notification.type === 'SELL_TP';
   const isServerDaemon = notification.source === 'SERVER_DAEMON';
+
+  const fmtMoney = (val: number, decimals: number = 2) =>
+    SettingsService.formatMoney(val, currency, usdPlnRate, decimals);
+  const fmtSignedMoney = (val: number, decimals: number = 2) =>
+    SettingsService.formatSignedMoney(val, currency, usdPlnRate, decimals);
 
   return (
     <div className="pointer-events-auto bg-slate-900/95 border border-slate-700/80 rounded-2xl p-4 shadow-2xl backdrop-blur-xl animate-slide-in relative overflow-hidden text-xs">
@@ -88,6 +109,7 @@ const ToastItem: React.FC<{ notification: AutoPilotNotification; onDismiss: (id:
 
         <button
           onClick={() => onDismiss(notification.id)}
+          title="Zamknij powiadomienie"
           className="text-slate-500 hover:text-slate-300 p-1 rounded-lg transition-colors cursor-pointer"
         >
           <X className="w-4 h-4" />
@@ -101,13 +123,13 @@ const ToastItem: React.FC<{ notification: AutoPilotNotification; onDismiss: (id:
         </div>
         <div className="flex justify-between items-center">
           <span className="font-sans text-slate-400">Kurs / Wartość:</span>
-          <span className="font-bold text-slate-200">{notification.pricePln.toFixed(2)} zł ({notification.totalPln.toLocaleString('pl-PL')} PLN)</span>
+          <span className="font-bold text-slate-200">{fmtMoney(notification.pricePln)} ({fmtMoney(notification.totalPln)})</span>
         </div>
         {notification.resultPln !== undefined && (
           <div className="flex justify-between items-center pt-1 border-t border-slate-800/60 font-sans">
             <span className="text-slate-400">Wynik PnL:</span>
             <span className={`font-bold font-mono ${notification.resultPln >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-              {notification.resultPln >= 0 ? '+' : ''}{notification.resultPln.toLocaleString('pl-PL')} PLN
+              {fmtSignedMoney(notification.resultPln)}
             </span>
           </div>
         )}

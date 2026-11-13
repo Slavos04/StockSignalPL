@@ -8,6 +8,7 @@ import {
   TelegramSettings,
   FearGreedData,
   AppSettings,
+  AppCurrency,
   AutoPilotNotification
 } from './types/stock';
 import { AuthService } from './services/authService';
@@ -183,6 +184,15 @@ export default function App() {
       const freshStocks = [...StooqService.getStocks()];
       setStocks(freshStocks);
 
+      const liveFx = StooqService.getUsdPlnRate();
+      if (liveFx > 0) {
+        setAppSettings(prev => (
+          Math.abs((prev.usdPlnRate || 0) - liveFx) >= 0.0001
+            ? { ...prev, usdPlnRate: Number(liveFx.toFixed(4)) }
+            : prev
+        ));
+      }
+
       const userId = currentUserRef.current?.id;
       // Do NOT overwrite portfolios with stale localStorage before initial server sync finishes;
       // and NEVER run competing client-side Auto-Pilot buys/sells (ServerAutoPilotDaemon runs 24/7 on server).
@@ -331,6 +341,15 @@ export default function App() {
       const freshStocks = [...StooqService.getStocks()];
       setStocks(freshStocks);
 
+      const liveFx = StooqService.getUsdPlnRate();
+      if (liveFx > 0) {
+        setAppSettings(prev => (
+          Math.abs((prev.usdPlnRate || 0) - liveFx) >= 0.0001
+            ? { ...prev, usdPlnRate: Number(liveFx.toFixed(4)) }
+            : prev
+        ));
+      }
+
       const userId = currentUserRef.current?.id;
       if (userId) {
         // Trigger server daemon evaluation cycle with fresh prices and pull latest trades/notifications
@@ -412,10 +431,19 @@ export default function App() {
   };
 
   const handleUpdateAppSettings = (newSettings: AppSettings) => {
-    SettingsService.saveSettings(newSettings);
-    setAppSettings(newSettings);
-    setSecondsUntilRefresh(newSettings.refreshIntervalSec);
+    const saved = SettingsService.saveSettings(newSettings);
+    setAppSettings({ ...saved });
+    setSecondsUntilRefresh(saved.refreshIntervalSec);
   };
+
+  const handleToggleCurrency = () => {
+    const nextCurrency: AppCurrency = appSettings.currency === 'USD' ? 'PLN' : 'USD';
+    const saved = SettingsService.saveSettings({ currency: nextCurrency });
+    setAppSettings({ ...saved });
+  };
+
+  const currency: AppCurrency = (appSettings.currency || 'PLN') as AppCurrency;
+  const usdPlnRate: number = appSettings.usdPlnRate || StooqService.getUsdPlnRate() || 3.97;
 
   return (
     <AuthGuard currentUser={currentUser} onLoginSuccess={(u) => setCurrentUser(u)}>
@@ -463,6 +491,9 @@ export default function App() {
             onSelectTicker={(sym) => handleSwitchToConsensus(sym)}
             notifications={notificationHistory}
             onMarkNotificationsRead={handleMarkNotificationsRead}
+            currency={currency}
+            usdPlnRate={usdPlnRate}
+            onToggleCurrency={handleToggleCurrency}
           />
 
           {/* Main Content Area */}
@@ -474,6 +505,8 @@ export default function App() {
                 trades={trades}
                 onTradesUpdate={handleTradesUpdate}
                 stocks={stocks}
+                currency={currency}
+                usdPlnRate={usdPlnRate}
               />
             )}
 
@@ -483,6 +516,8 @@ export default function App() {
                 onSourcesUpdate={setSources}
                 onSwitchToConsensus={() => setActiveTab('consensus')}
                 customReports={customReports}
+                currency={currency}
+                usdPlnRate={usdPlnRate}
               />
             )}
 
@@ -498,6 +533,8 @@ export default function App() {
                 onNavigateToCalculator={handleNavigateToCalculator}
                 onSwitchToPortfolios={() => setActiveTab('portfolios')}
                 onStockAdded={handleStockAdded}
+                currency={currency}
+                usdPlnRate={usdPlnRate}
               />
             )}
 
@@ -510,6 +547,8 @@ export default function App() {
                 portfolios={portfolios}
                 onPortfoliosUpdate={handlePortfoliosUpdate}
                 onStockAdded={handleStockAdded}
+                currency={currency}
+                usdPlnRate={usdPlnRate}
               />
             )}
 
@@ -532,8 +571,8 @@ export default function App() {
               <p>
                 StockSignalPl v2.4.5 • Polski Rynek Giełdowy (GPW Warszawa: WIG20, mWIG40, sWIG80, NewConnect, FW20).
               </p>
-              <p className="font-mono text-[11px] text-slate-400">
-                Waluta: PLN (zł) • Benchmark: WIG20 • Odświeżanie: {appSettings.refreshIntervalSec}s
+              <p className="font-mono text-[11px] text-slate-400" title="Aktywna waluta prezentacji, oficjalny kurs NBP oraz interwał odświeżania">
+                Waluta: {currency === 'USD' ? `USD ($ • 1$ = ${usdPlnRate.toFixed(2)} zł)` : `PLN (zł • 1$ = ${usdPlnRate.toFixed(2)} zł)`} • Benchmark: WIG20 • Odświeżanie: {appSettings.refreshIntervalSec}s
               </p>
             </div>
           </footer>
@@ -543,6 +582,8 @@ export default function App() {
         <AutoPilotToast
           notifications={autoPilotNotifications}
           onDismiss={(id) => setAutoPilotNotifications(prev => prev.filter(n => n.id !== id))}
+          currency={currency}
+          usdPlnRate={usdPlnRate}
         />
 
         {/* Modals */}

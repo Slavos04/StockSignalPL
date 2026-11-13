@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { AppSettings, AppTheme, TelegramSettings } from '../types/stock';
+import { AppSettings, AppTheme, AppCurrency, TelegramSettings } from '../types/stock';
 import { TelegramService } from '../services/telegramService';
-import { Settings, X, Palette, Image, Send, Clock, CheckCircle2, RotateCcw, Upload, Link2 } from 'lucide-react';
+import { Settings, X, Palette, Image, Send, Clock, CheckCircle2, RotateCcw, Upload, Link2, Coins } from 'lucide-react';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -22,6 +22,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 }) => {
   // Theme & Background state
   const [selectedTheme, setSelectedTheme] = useState<AppTheme>(appSettings.theme);
+  const [selectedCurrency, setSelectedCurrency] = useState<AppCurrency>(appSettings.currency || 'PLN');
   const [customBgInput, setCustomBgInput] = useState<string>(appSettings.customBgUrl || '');
   const [bgOpacity, setBgOpacity] = useState<number>(appSettings.bgOpacity ?? 85);
   const [bgBlur, setBgBlur] = useState<number>(appSettings.bgBlur ?? 0);
@@ -39,6 +40,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   useEffect(() => {
     if (isOpen) {
       setSelectedTheme(appSettings.theme);
+      setSelectedCurrency(appSettings.currency || 'PLN');
       setCustomBgInput(appSettings.customBgUrl || '');
       setBgOpacity(appSettings.bgOpacity ?? 85);
       setBgBlur(appSettings.bgBlur ?? 0);
@@ -165,6 +167,21 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     const updated = {
       ...appSettings,
       theme,
+      currency: selectedCurrency,
+      customBgUrl: customBgInput.trim(),
+      refreshIntervalSec: refreshInterval,
+      bgOpacity,
+      bgBlur
+    };
+    onUpdateAppSettings(updated);
+  };
+
+  const handleCurrencyChange = (curr: AppCurrency) => {
+    setSelectedCurrency(curr);
+    const updated = {
+      ...appSettings,
+      theme: selectedTheme,
+      currency: curr,
       customBgUrl: customBgInput.trim(),
       refreshIntervalSec: refreshInterval,
       bgOpacity,
@@ -178,6 +195,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     const updatedApp = {
       ...appSettings,
       theme: selectedTheme,
+      currency: selectedCurrency,
       customBgUrl: customBgInput.trim(),
       refreshIntervalSec: refreshInterval,
       bgOpacity,
@@ -230,7 +248,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
           <button
             onClick={onClose}
-            className="p-2 text-slate-400 hover:text-white rounded-xl hover:bg-slate-800 transition-colors"
+            title="Zamknij okno ustawień"
+            className="p-2 text-slate-400 hover:text-white rounded-xl hover:bg-slate-800 transition-colors cursor-pointer"
           >
             <X className="w-5 h-5" />
           </button>
@@ -245,6 +264,54 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               <span>{toastMessage}</span>
             </div>
           )}
+
+          {/* Section 0: Currency */}
+          <div className="p-4 rounded-xl bg-slate-950/60 border border-slate-800 space-y-2.5">
+            <div className="flex items-center justify-between gap-2 flex-wrap">
+              <h4 className="text-xs font-bold text-white uppercase tracking-wider flex items-center gap-2">
+                <Coins className="w-4 h-4 text-amber-400" />
+                <span>Waluta Wyświetlania Platformy</span>
+              </h4>
+              <span className="text-[11px] font-mono text-slate-400" title="Oficjalny średni kurs NBP używany do przeliczeń PLN <-> USD">
+                Kurs NBP: <b className="text-emerald-400">1 USD = {(appSettings.usdPlnRate || 3.97).toFixed(4)} PLN</b>
+              </span>
+            </div>
+            <div className="grid grid-cols-2 gap-2.5">
+              <button
+                type="button"
+                onClick={() => handleCurrencyChange('PLN')}
+                title="Wyświetlaj wszystkie portfele, wykresy i kursy w polskich złotych (PLN)"
+                className={`p-3 rounded-xl border text-left transition-all cursor-pointer ${
+                  selectedCurrency === 'PLN'
+                    ? 'border-emerald-500 bg-slate-800/90 shadow-md ring-1 ring-emerald-500'
+                    : 'border-slate-800 bg-slate-950/60 hover:bg-slate-800/50'
+                }`}
+              >
+                <p className="font-bold text-white flex items-center gap-1.5">
+                  <span className="text-yellow-400 font-extrabold">zł</span>
+                  <span>Polski Złoty (PLN)</span>
+                </p>
+                <p className="text-[10px] text-slate-400">Waluta bazowa GPW Warszawa</p>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => handleCurrencyChange('USD')}
+                title="Przeliczaj wszystkie portfele, wykresy i kursy na dolary amerykańskie (USD) po kursie NBP"
+                className={`p-3 rounded-xl border text-left transition-all cursor-pointer ${
+                  selectedCurrency === 'USD'
+                    ? 'border-emerald-500 bg-slate-800/90 shadow-md ring-1 ring-emerald-500'
+                    : 'border-slate-800 bg-slate-950/60 hover:bg-slate-800/50'
+                }`}
+              >
+                <p className="font-bold text-white flex items-center gap-1.5">
+                  <span className="text-yellow-400 font-extrabold">$</span>
+                  <span>Dolar Amerykański (USD)</span>
+                </p>
+                <p className="text-[10px] text-slate-400">Przelicznik wg kursu NBP na żywo</p>
+              </button>
+            </div>
+          </div>
 
           {/* Section 1: Themes */}
           <div>

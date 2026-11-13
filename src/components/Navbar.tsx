@@ -1,5 +1,5 @@
 import React from 'react';
-import { UserAccount, FearGreedData, StockQuote, PortfolioStrategy, PositionItem, AutoPilotNotification } from '../types/stock';
+import { UserAccount, FearGreedData, StockQuote, PortfolioStrategy, PositionItem, AutoPilotNotification, AppCurrency } from '../types/stock';
 import { MarketSessionInfo } from '../services/marketSessionService';
 import { SettingsService } from '../services/settingsService';
 import {
@@ -46,6 +46,9 @@ interface NavbarProps {
   onSelectTicker?: (symbol: string) => void;
   notifications?: AutoPilotNotification[];
   onMarkNotificationsRead?: (ids?: string[]) => void;
+  currency?: AppCurrency;
+  usdPlnRate?: number;
+  onToggleCurrency?: () => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -65,7 +68,10 @@ export const Navbar: React.FC<NavbarProps> = ({
   portfolios = [],
   onSelectTicker,
   notifications = [],
-  onMarkNotificationsRead
+  onMarkNotificationsRead,
+  currency = 'PLN',
+  usdPlnRate = 3.97,
+  onToggleCurrency
 }) => {
   const [userMenuOpen, setUserMenuOpen] = React.useState(false);
   const [notifMenuOpen, setNotifMenuOpen] = React.useState(false);
@@ -89,12 +95,14 @@ export const Navbar: React.FC<NavbarProps> = ({
         s.symbol.toUpperCase().includes(cleanSym.toUpperCase())
       );
       if (match) {
-        const usdRate = 3.91; // Oficjalny NBP
-        const usdPrice = (match.price / usdRate).toFixed(2);
+        const rate = usdPlnRate > 0 ? usdPlnRate : 3.97;
+        const usdPrice = (match.price / rate).toFixed(2);
         return {
           rawSymbol: match.symbol,
           symbol: `${cleanSym} (${label})`,
-          price: `$${usdPrice} (${match.price.toFixed(2)} zł)`,
+          price: currency === 'USD'
+            ? `$${usdPrice} (${match.price.toFixed(2)} zł)`
+            : `${match.price.toFixed(2)} zł ($${usdPrice})`,
           change: `${match.change >= 0 ? '+' : ''}${match.changePercent.toFixed(2)}%`,
           isUp: match.change >= 0
         };
@@ -139,7 +147,7 @@ export const Navbar: React.FC<NavbarProps> = ({
         portfolioStockList.push({
           rawSymbol: s.symbol,
           symbol: s.cleanSymbol,
-          price: `${s.price.toFixed(2)} zł`,
+          price: SettingsService.formatMoney(s.price, currency, usdPlnRate),
           change: `${s.change >= 0 ? '+' : ''}${s.changePercent.toFixed(2)}%`,
           isUp: s.change >= 0
         });
@@ -147,7 +155,7 @@ export const Navbar: React.FC<NavbarProps> = ({
     });
 
     return [...commodities, ...indices, ...portfolioStockList];
-  }, [fearGreed, stocks, portfolios]);
+  }, [fearGreed, stocks, portfolios, currency, usdPlnRate]);
 
   return (
     <>
@@ -420,6 +428,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                     {unreadCount > 0 && onMarkNotificationsRead && (
                       <button
                         onClick={() => onMarkNotificationsRead()}
+                        title="Oznacz wszystkie powiadomienia jako przeczytane"
                         className="px-2 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-[10px] font-bold text-emerald-300 flex items-center gap-1 cursor-pointer"
                       >
                         <CheckCheck className="w-3 h-3" />
@@ -477,14 +486,14 @@ export const Navbar: React.FC<NavbarProps> = ({
                             <div className="flex items-center justify-between text-[11px] text-slate-300 font-mono">
                               <span className="font-sans text-slate-400 truncate max-w-[170px]">{n.portfolioName}</span>
                               <span>
-                                <b className="text-white">{n.ticker}</b> • {n.shares} szt. @ {Number(n.pricePln).toFixed(2)} zł
+                                <b className="text-white">{n.ticker}</b> • {n.shares} szt. @ {SettingsService.formatMoney(Number(n.pricePln), currency, usdPlnRate)}
                               </span>
                             </div>
 
                             {n.resultPln !== undefined && (
                               <div className="text-right text-[11px] font-mono mt-0.5">
                                 <span className={n.resultPln >= 0 ? 'text-emerald-400 font-bold' : 'text-rose-400 font-bold'}>
-                                  PnL: {n.resultPln >= 0 ? '+' : ''}{Number(n.resultPln).toLocaleString('pl-PL')} PLN
+                                  PnL: {SettingsService.formatSignedMoney(Number(n.resultPln), currency, usdPlnRate)}
                                 </span>
                               </div>
                             )}
@@ -508,17 +517,20 @@ export const Navbar: React.FC<NavbarProps> = ({
 
             {/* Currency Switcher ($ USD / zł PLN) */}
             <button
+              type="button"
               onClick={() => {
-                const currentSettings = SettingsService.getSettings();
-                const nextCurrency = currentSettings.currency === 'USD' ? 'PLN' : 'USD';
-                SettingsService.saveSettings({ currency: nextCurrency });
-                if (onOpenSettingsModal) onOpenSettingsModal();
+                if (onToggleCurrency) {
+                  onToggleCurrency();
+                } else {
+                  const nextCurrency = currency === 'USD' ? 'PLN' : 'USD';
+                  SettingsService.saveSettings({ currency: nextCurrency });
+                }
               }}
-              title="Przełącznik Waluty Wyświetlania: PLN (zł) / USD ($) po kursie NBP"
+              title={`Przełącz walutę wyświetlania między PLN (zł) a USD ($) wg bieżącego kursu NBP (1 USD = ${usdPlnRate.toFixed(2)} PLN)`}
               className="px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-bold text-emerald-400 border border-slate-700 flex items-center gap-1.5 transition-colors cursor-pointer"
             >
-              <span className="text-yellow-400 font-extrabold">{SettingsService.getSettings().currency === 'USD' ? '$' : 'zł'}</span>
-              <span>{SettingsService.getSettings().currency === 'USD' ? 'USD' : 'PLN'}</span>
+              <span className="text-yellow-400 font-extrabold">{currency === 'USD' ? '$' : 'zł'}</span>
+              <span>{currency === 'USD' ? 'USD' : 'PLN'}</span>
             </button>
 
             {/* Settings Gear Button (zębatka) */}
@@ -566,6 +578,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                         setUserMenuOpen(false);
                         onChangePasswordClick();
                       }}
+                      title="Otwórz formularz zmiany hasła do Twojego konta"
                       className="w-full px-4 py-2 text-left text-xs text-slate-300 hover:bg-slate-800 flex items-center gap-2 cursor-pointer"
                     >
                       <Key className="w-3.5 h-3.5 text-slate-400" />
@@ -577,6 +590,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                         setUserMenuOpen(false);
                         onOpenSettingsModal();
                       }}
+                      title="Otwórz ustawienia motywów, waluty, tła i integracji Telegram"
                       className="w-full px-4 py-2 text-left text-xs text-slate-300 hover:bg-slate-800 flex items-center gap-2 cursor-pointer"
                     >
                       <Settings className="w-3.5 h-3.5 text-sky-400" />
@@ -590,6 +604,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                         setUserMenuOpen(false);
                         onLogout();
                       }}
+                      title="Wyloguj się bezpiecznie z platformy StockSignalPL"
                       className="w-full px-4 py-2 text-left text-xs text-rose-400 hover:bg-rose-950/40 flex items-center gap-2 font-medium cursor-pointer"
                     >
                       <LogOut className="w-3.5 h-3.5" />
@@ -606,6 +621,7 @@ export const Navbar: React.FC<NavbarProps> = ({
         <div className="lg:hidden flex items-center justify-around py-2 border-t border-slate-800 text-xs overflow-x-auto">
           <button
             onClick={() => setActiveTab('audit')}
+            title="Etap 1: Audyt trafności 10 źródeł sygnałowych"
             className={`px-2.5 py-1.5 rounded-lg flex items-center gap-1 font-semibold ${
               activeTab === 'audit' ? 'text-emerald-400 bg-emerald-950/40' : 'text-slate-400'
             }`}
@@ -615,6 +631,7 @@ export const Navbar: React.FC<NavbarProps> = ({
           </button>
           <button
             onClick={() => setActiveTab('consensus')}
+            title="Etap 2: Live Konsensus i poziomy Multi-TP"
             className={`px-2.5 py-1.5 rounded-lg flex items-center gap-1 font-semibold ${
               activeTab === 'consensus' ? 'text-emerald-400 bg-emerald-950/40' : 'text-slate-400'
             }`}
@@ -624,6 +641,7 @@ export const Navbar: React.FC<NavbarProps> = ({
           </button>
           <button
             onClick={() => setActiveTab('portfolios')}
+            title="Etap 3: Zarządzanie portfelami i otwartymi pozycjami"
             className={`px-2.5 py-1.5 rounded-lg flex items-center gap-1 font-semibold ${
               activeTab === 'portfolios' ? 'text-emerald-400 bg-emerald-950/40' : 'text-slate-400'
             }`}
@@ -633,6 +651,7 @@ export const Navbar: React.FC<NavbarProps> = ({
           </button>
           <button
             onClick={() => setActiveTab('ranking')}
+            title="Ranking spółek GPW oraz kalkulator pozycji"
             className={`px-2.5 py-1.5 rounded-lg flex items-center gap-1 font-semibold ${
               activeTab === 'ranking' ? 'text-emerald-400 bg-emerald-950/40' : 'text-slate-400'
             }`}
@@ -642,6 +661,7 @@ export const Navbar: React.FC<NavbarProps> = ({
           </button>
           <button
             onClick={() => setActiveTab('admin')}
+            title="Panel administratora, daemon 24/7 i użytkownicy"
             className={`px-2.5 py-1.5 rounded-lg flex items-center gap-1 font-semibold ${
               activeTab === 'admin' ? 'text-emerald-400 bg-emerald-950/40' : 'text-slate-400'
             }`}

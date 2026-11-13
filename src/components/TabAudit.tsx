@@ -1,6 +1,7 @@
-import React, { useState, useMemo, useEffect } from 'react';
-import { SignalSource, AnalystReportItem } from '../types/stock';
+import React, { useState, useMemo } from 'react';
+import { SignalSource, AnalystReportItem, AppCurrency } from '../types/stock';
 import { StooqService } from '../services/stooqService';
+import { SettingsService } from '../services/settingsService';
 import { INITIAL_ANALYST_REPORTS } from '../data/initialData';
 import { ShieldCheck, Sliders, RotateCcw, CheckCircle2, ArrowUpDown, Info, HelpCircle, ArrowRight, TrendingUp, Plus, X, Send, Globe, Bot } from 'lucide-react';
 
@@ -9,14 +10,19 @@ interface TabAuditProps {
   onSourcesUpdate: (sources: SignalSource[]) => void;
   onSwitchToConsensus?: () => void;
   customReports?: AnalystReportItem[];
+  currency?: AppCurrency;
+  usdPlnRate?: number;
 }
 
 export const TabAudit: React.FC<TabAuditProps> = ({
   sources,
   onSourcesUpdate,
   onSwitchToConsensus,
-  customReports: propCustomReports
+  customReports: propCustomReports,
+  currency = 'PLN',
+  usdPlnRate = 3.97
 }) => {
+  const fmtMoney = (valPln: number) => SettingsService.formatMoney(valPln, currency, usdPlnRate, 2);
   const [successToast, setSuccessToast] = useState<string | null>(null);
   const [selectedBroker, setSelectedBroker] = useState<string>('ALL');
 
@@ -128,6 +134,7 @@ export const TabAudit: React.FC<TabAuditProps> = ({
             {onSwitchToConsensus && (
               <button
                 onClick={onSwitchToConsensus}
+                title="Przejdź bezpośrednio do widoku Etapu 2: Live Konsensus"
                 className="flex items-center gap-2 px-4 py-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-black transition-all shadow-lg shadow-emerald-950/50 cursor-pointer"
               >
                 <span>Przejdź do Etapu 2: Live Konsensus</span>
@@ -400,6 +407,7 @@ export const TabAudit: React.FC<TabAuditProps> = ({
             <select
               value={selectedBroker}
               onChange={(e) => setSelectedBroker(e.target.value)}
+              title="Filtruj raporty rekomendacji według domu maklerskiego lub źródła"
               className="bg-slate-950 border border-slate-700 text-slate-200 rounded-lg px-3 py-1.5 text-xs font-semibold focus:outline-none focus:border-emerald-500 cursor-pointer"
             >
               <option value="ALL">Wszystkie Źródła & Domy Maklerskie ({filteredReports.length})</option>
@@ -435,6 +443,7 @@ export const TabAudit: React.FC<TabAuditProps> = ({
                     <span className="text-xs text-slate-400 font-mono">{rep.date}</span>
                   </div>
                   <span
+                    title={`Status realizacji rekomendacji względem ceny z dnia wydania`}
                     className={`px-2 py-0.5 rounded text-[10px] font-bold border ${
                       isTargetReached
                         ? 'bg-emerald-950 text-emerald-300 border-emerald-700/60'
@@ -460,10 +469,10 @@ export const TabAudit: React.FC<TabAuditProps> = ({
 
                   <div className="text-right font-mono">
                     <div className="text-xs text-slate-400">
-                      Cena z raportu: <strong className="text-slate-200">{rep.priceAtReport.toFixed(2)} zł</strong>
+                      Cena z raportu: <strong className="text-slate-200">{fmtMoney(rep.priceAtReport)}</strong>
                     </div>
                     <div className="text-xs text-slate-400 mt-0.5">
-                      Cena docelowa: <strong className="text-emerald-400">{rep.targetPrice.toFixed(2)} zł</strong>
+                      Cena docelowa: <strong className="text-emerald-400">{fmtMoney(rep.targetPrice)}</strong>
                     </div>
                   </div>
                 </div>
@@ -474,7 +483,7 @@ export const TabAudit: React.FC<TabAuditProps> = ({
                 </div>
 
                 <div className="flex items-center justify-between pt-1 text-xs font-mono border-t border-slate-800/60">
-                  <span className="text-slate-400">Aktualny kurs rynkowy: <strong className="text-white">{rep.currentPrice.toFixed(2)} zł</strong></span>
+                  <span className="text-slate-400">Aktualny kurs rynkowy: <strong className="text-white">{fmtMoney(rep.currentPrice)}</strong></span>
                   <span className={`font-bold ${isGain ? 'text-emerald-400' : 'text-rose-400'}`}>
                     Wynik: {isGain ? '+' : ''}{rep.returnPct.toFixed(2)}%
                   </span>
@@ -499,6 +508,7 @@ export const TabAudit: React.FC<TabAuditProps> = ({
           </div>
           <button
             onClick={onSwitchToConsensus}
+            title="Przejdź do zakładki Etap 2: Live Konsensus"
             className="shrink-0 px-6 py-3 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-xs flex items-center gap-2 transition-all shadow-xl hover:scale-105 cursor-pointer"
           >
             <span>Otwórz Etap 2: Live Konsensus</span>

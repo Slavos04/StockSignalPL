@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useRef } from 'react';
-import { StockQuote, StockMarket, PortfolioStrategy } from '../types/stock';
+import { StockQuote, StockMarket, PortfolioStrategy, AppCurrency } from '../types/stock';
 import { PortfolioService } from '../services/portfolioService';
+import { SettingsService } from '../services/settingsService';
 import { AddNewStockModal } from './AddNewStockModal';
 import {
   BarChart3,
@@ -10,10 +11,7 @@ import {
   PlusCircle,
   CheckCircle2,
   ChevronLeft,
-  ChevronRight,
-  Shield,
-  HelpCircle,
-  Trash2
+  ChevronRight
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 
@@ -26,6 +24,8 @@ interface TabRankingCalculatorProps {
   onPortfoliosUpdate: (p: PortfolioStrategy[]) => void;
   onStockAdded: (stock: StockQuote) => void;
   onStockDeleted?: (symbol: string) => void;
+  currency?: AppCurrency;
+  usdPlnRate?: number;
 }
 
 export const TabRankingCalculator: React.FC<TabRankingCalculatorProps> = ({
@@ -36,7 +36,8 @@ export const TabRankingCalculator: React.FC<TabRankingCalculatorProps> = ({
   portfolios,
   onPortfoliosUpdate,
   onStockAdded,
-  onStockDeleted
+  currency = 'PLN',
+  usdPlnRate = 3.97
 }) => {
   const [marketFilter, setMarketFilter] = useState<'ALL' | StockMarket>('ALL');
   const [searchTerm, setSearchTerm] = useState('');
@@ -44,17 +45,30 @@ export const TabRankingCalculator: React.FC<TabRankingCalculatorProps> = ({
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
   const [isAddStockOpen, setIsAddStockOpen] = useState(false);
 
-  // Calculator inputs
+  const currCode = SettingsService.getCurrencyCode(currency);
+  const currSymbol = SettingsService.getCurrencySymbol(currency);
+  const fmtMoney = (valPln: number, dec = 2) => SettingsService.formatMoney(valPln, currency, usdPlnRate, dec);
+  const fromPln = (valPln: number) => SettingsService.convertFromPln(valPln, currency, usdPlnRate);
+  const toPln = (valDisplay: number) => SettingsService.convertToPln(valDisplay, currency, usdPlnRate);
+
+  // Calculator inputs stored in ACTIVE DISPLAY CURRENCY for natural editing
   const selectedStock = stocks.find(s => s.symbol.toLowerCase() === selectedSymbol.toLowerCase()) || stocks[0];
-  const [accountCapital, setAccountCapital] = useState<number>(50000);
+  const [accountCapital, setAccountCapital] = useState<number>(() =>
+    Math.round(SettingsService.convertFromPln(50000, currency, usdPlnRate))
+  );
   const [riskPercent, setRiskPercent] = useState<number>(2.0);
   const [useKellyModel, setUseKellyModel] = useState<boolean>(false);
   const [selectedPortfolioId, setSelectedPortfolioId] = useState<string>(portfolios[0]?.id || 'wig20_bluechips');
 
-  const [entryPrice, setEntryPrice] = useState<number>(selectedStock ? selectedStock.price : 68.45);
-  const [stopLossPrice, setStopLossPrice] = useState<number>(selectedStock ? Number((selectedStock.price * 0.972).toFixed(2)) : 66.53);
+  const [entryPrice, setEntryPrice] = useState<number>(() =>
+    Number(SettingsService.convertFromPln(selectedStock ? selectedStock.price : 68.45, currency, usdPlnRate).toFixed(2))
+  );
+  const [stopLossPrice, setStopLossPrice] = useState<number>(() =>
+    Number(SettingsService.convertFromPln((selectedStock ? selectedStock.price : 68.45) * 0.972, currency, usdPlnRate).toFixed(2))
+  );
 
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const prevCurrencyRef = useRef<AppCurrency>(currency);
 
   const marketFilterBarRef = useRef<HTMLDivElement>(null);
 
@@ -65,13 +79,27 @@ export const TabRankingCalculator: React.FC<TabRankingCalculatorProps> = ({
     }
   };
 
-  // Sync inputs when selectedStock changes
+  // Convert calculator inputs smoothly when user switches PLN <-> USD
+  React.useEffect(() => {
+    if (prevCurrencyRef.current !== currency) {
+      const prev = prevCurrencyRef.current;
+      const capPln = SettingsService.convertToPln(accountCapital, prev, usdPlnRate);
+      const entPln = SettingsService.convertToPln(entryPrice, prev, usdPlnRate);
+      const slPln = SettingsService.convertToPln(stopLossPrice, prev, usdPlnRate);
+      setAccountCapital(Math.round(SettingsService.convertFromPln(capPln, currency, usdPlnRate)));
+      setEntryPrice(Number(SettingsService.convertFromPln(entPln, currency, usdPlnRate).toFixed(2)));
+      setStopLossPrice(Number(SettingsService.convertFromPln(slPln, currency, usdPlnRate).toFixed(2)));
+      prevCurrencyRef.current = currency;
+    }
+  }, [currency, usdPlnRate, accountCapital, entryPrice, stopLossPrice]);
+
+  // Sync entry/SL inputs when selectedStock changes
   React.useEffect(() => {
     if (selectedStock) {
-      setEntryPrice(selectedStock.price);
-      setStopLossPrice(Number((selectedStock.price * 0.972).toFixed(2)));
+      setEntryPrice(Number(SettingsService.convertFromPln(selectedStock.price, currency, usdPlnRate).toFixed(2)));
+      setStopLossPrice(Number(SettingsService.convertFromPln(selectedStock.price * 0.972, currency, usdPlnRate).toFixed(2)));
     }
-  }, [selectedStock.symbol]);
+  }, [selectedStock?.symbol]);
 
   // Filtering & Sorting
   const filteredStocks = useMemo(() => {
@@ -105,10 +133,10 @@ export const TabRankingCalculator: React.FC<TabRankingCalculatorProps> = ({
     }
   };
 
-  // Advanced Position Sizing Calculations
+  // Advanced Position Sizing Calculations (returns both display amounts and canonical PLN values)
   const calculatedPosition = useMemo(() => {
     const slDiff = Math.max(0.01, entryPrice - stopLossPrice);
-    const slPercent = (slDiff / entryPrice) * 100;
+    const slPercent = (slDiff / (entryPrice || 1)) * 100;
 
     let effectiveRiskPercent = riskPercent;
 
@@ -119,36 +147,44 @@ export const TabRankingCalculator: React.FC<TabRankingCalculatorProps> = ({
       effectiveRiskPercent = Number((fullKelly * 0.05 * 100).toFixed(1));
     }
 
-    const maxLossPln = (accountCapital * effectiveRiskPercent) / 100;
-    const rawShares = maxLossPln / slDiff;
+    const maxLossDisplay = (accountCapital * effectiveRiskPercent) / 100;
+    const rawShares = maxLossDisplay / slDiff;
     const shares = Math.max(1, Math.floor(rawShares));
-    const totalExposurePln = Number((shares * entryPrice).toFixed(2));
+    const totalExposureDisplay = Number((shares * entryPrice).toFixed(2));
 
-    const tp1 = Number((entryPrice * 1.032).toFixed(2));
-    const tp2 = Number((entryPrice * 1.065).toFixed(2));
-    const tp3 = Number((entryPrice * 1.118).toFixed(2));
+    const tp1Display = Number((entryPrice * 1.032).toFixed(2));
+    const tp2Display = Number((entryPrice * 1.065).toFixed(2));
+    const tp3Display = Number((entryPrice * 1.118).toFixed(2));
 
-    const tp1ProfitPln = Number(((tp1 - entryPrice) * (shares * 0.33)).toFixed(2));
-    const tp2ProfitPln = Number(((tp2 - entryPrice) * (shares * 0.33)).toFixed(2));
-    const tp3ProfitPln = Number(((tp3 - entryPrice) * (shares * 0.34)).toFixed(2));
-    const totalExpectedProfitPln = Number((tp1ProfitPln + tp2ProfitPln + tp3ProfitPln).toFixed(2));
+    const tp1ProfitDisplay = Number(((tp1Display - entryPrice) * (shares * 0.33)).toFixed(2));
+    const tp2ProfitDisplay = Number(((tp2Display - entryPrice) * (shares * 0.33)).toFixed(2));
+    const tp3ProfitDisplay = Number(((tp3Display - entryPrice) * (shares * 0.34)).toFixed(2));
+    const totalExpectedProfitDisplay = Number((tp1ProfitDisplay + tp2ProfitDisplay + tp3ProfitDisplay).toFixed(2));
+
+    const entryPln = Number(toPln(entryPrice).toFixed(2));
+    const slPln = Number(toPln(stopLossPrice).toFixed(2));
+    const tp1Pln = Number((entryPln * 1.032).toFixed(2));
+    const tp2Pln = Number((entryPln * 1.065).toFixed(2));
+    const tp3Pln = Number((entryPln * 1.118).toFixed(2));
 
     return {
       effectiveRiskPercent,
-      maxLossPln,
+      maxLossDisplay,
       shares,
-      totalExposurePln,
+      totalExposureDisplay,
       slPercent,
-      tp1,
-      tp2,
-      tp3,
-      tp1ProfitPln,
-      tp2ProfitPln,
-      tp3ProfitPln,
-      totalExpectedProfitPln,
-      riskRewardRatio: Number((totalExpectedProfitPln / (maxLossPln || 1)).toFixed(1)) || 2.8
+      tp1Display,
+      tp2Display,
+      tp3Display,
+      entryPln,
+      slPln,
+      tp1Pln,
+      tp2Pln,
+      tp3Pln,
+      totalExpectedProfitDisplay,
+      riskRewardRatio: Number((totalExpectedProfitDisplay / (maxLossDisplay || 1)).toFixed(1)) || 2.8
     };
-  }, [accountCapital, riskPercent, useKellyModel, entryPrice, stopLossPrice]);
+  }, [accountCapital, riskPercent, useKellyModel, entryPrice, stopLossPrice, currency, usdPlnRate]);
 
   const handleAddToPortfolio = () => {
     if (!selectedStock) return;
@@ -156,11 +192,11 @@ export const TabRankingCalculator: React.FC<TabRankingCalculatorProps> = ({
       selectedPortfolioId,
       selectedStock,
       calculatedPosition.shares,
-      entryPrice,
-      stopLossPrice,
-      calculatedPosition.tp1,
-      calculatedPosition.tp2,
-      calculatedPosition.tp3
+      calculatedPosition.entryPln,
+      calculatedPosition.slPln,
+      calculatedPosition.tp1Pln,
+      calculatedPosition.tp2Pln,
+      calculatedPosition.tp3Pln
     );
 
     if (res.success) {
@@ -184,7 +220,7 @@ export const TabRankingCalculator: React.FC<TabRankingCalculatorProps> = ({
         </div>
       )}
 
-      {/* Kalkulator Wielkości Pozycji w PLN */}
+      {/* Kalkulator Wielkości Pozycji */}
       <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-6 shadow-xl">
         <div className="flex flex-wrap items-center justify-between gap-4 mb-6">
           <div>
@@ -192,10 +228,10 @@ export const TabRankingCalculator: React.FC<TabRankingCalculatorProps> = ({
               <div className="w-8 h-8 rounded-lg bg-emerald-600/20 text-emerald-400 border border-emerald-500/30 flex items-center justify-center">
                 <Calculator className="w-4 h-4" />
               </div>
-              <h2 className="text-xl font-black text-white">Kalkulator Wielkości Pozycji & Zarządzania Ryzykiem (PLN)</h2>
+              <h2 className="text-xl font-black text-white">Kalkulator Wielkości Pozycji & Zarządzania Ryzykiem ({currCode})</h2>
             </div>
             <p className="text-xs text-slate-400 mt-1">
-              Wylicz dokładną liczbę akcji, ekspozycję w PLN oraz zyski dla Multi-TP (33/33/34) przy żądanym ryzyku transakcji.
+              Wylicz dokładną liczbę akcji, ekspozycję w {currCode} oraz zyski dla Multi-TP (33/33/34) przy żądanym ryzyku transakcji.
             </p>
           </div>
 
@@ -205,7 +241,7 @@ export const TabRankingCalculator: React.FC<TabRankingCalculatorProps> = ({
               title={`Wybrana spółka do kalkulacji: ${selectedStock.name}`}
               className="px-3 py-1 rounded-xl bg-slate-800 text-rose-400 font-bold text-xs border border-slate-700 font-mono"
             >
-              {selectedStock.symbol} ({selectedStock.price.toFixed(2)} zł)
+              {selectedStock.symbol} ({fmtMoney(selectedStock.price)})
             </span>
           </div>
         </div>
@@ -214,19 +250,19 @@ export const TabRankingCalculator: React.FC<TabRankingCalculatorProps> = ({
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
           {/* Kapitał */}
           <div>
-            <label className="block text-xs font-semibold text-slate-300 mb-1.5" title="Twój całkowity kapitał przeznaczony na inwestycje">
-              Kapitał Konta (PLN)
+            <label className="block text-xs font-semibold text-slate-300 mb-1.5" title={`Twój całkowity kapitał przeznaczony na inwestycje w ${currCode}`}>
+              Kapitał Konta ({currCode})
             </label>
             <div className="relative">
               <input
                 type="number"
-                min="1000"
+                min="100"
                 step="500"
                 value={accountCapital}
                 onChange={(e) => setAccountCapital(Math.max(100, parseFloat(e.target.value) || 0))}
                 className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-sm text-white font-mono focus:outline-none focus:border-rose-500"
               />
-              <span className="absolute right-3.5 top-2.5 text-xs text-slate-500 font-mono">PLN</span>
+              <span className="absolute right-3.5 top-2.5 text-xs text-slate-500 font-mono">{currCode}</span>
             </div>
           </div>
 
@@ -258,6 +294,7 @@ export const TabRankingCalculator: React.FC<TabRankingCalculatorProps> = ({
               <select
                 value={riskPercent}
                 onChange={(e) => setRiskPercent(parseFloat(e.target.value))}
+                title="Wybierz dopuszczalne ryzyko procentowe na pojedynczą transakcję"
                 className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-sm text-white focus:outline-none focus:border-rose-500 font-mono"
               >
                 <option value={1.0}>1.0% - Konserwatywne</option>
@@ -271,8 +308,8 @@ export const TabRankingCalculator: React.FC<TabRankingCalculatorProps> = ({
 
           {/* Cena Wejścia */}
           <div>
-            <label className="block text-xs font-semibold text-slate-300 mb-1.5" title="Planowany kurs zakupu akcji lub kontraktu">
-              Cena Wejścia (PLN)
+            <label className="block text-xs font-semibold text-slate-300 mb-1.5" title={`Planowany kurs zakupu akcji lub kontraktu (${currCode})`}>
+              Cena Wejścia ({currCode})
             </label>
             <div className="relative">
               <input
@@ -282,14 +319,14 @@ export const TabRankingCalculator: React.FC<TabRankingCalculatorProps> = ({
                 onChange={(e) => setEntryPrice(Math.max(0.01, parseFloat(e.target.value) || 0))}
                 className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-sm text-white font-mono focus:outline-none focus:border-rose-500"
               />
-              <span className="absolute right-3.5 top-2.5 text-xs text-slate-500 font-mono">zł</span>
+              <span className="absolute right-3.5 top-2.5 text-xs text-slate-500 font-mono">{currSymbol}</span>
             </div>
           </div>
 
           {/* Stop Loss */}
           <div>
-            <label className="block text-xs font-semibold text-slate-300 mb-1.5" title="Poziom obrony, po przekroczeniu którego pozycja zostaje natychmiast zamknięta">
-              Poziom Stop Loss (PLN)
+            <label className="block text-xs font-semibold text-slate-300 mb-1.5" title={`Poziom obrony (${currCode}), po przekroczeniu którego pozycja zostaje natychmiast zamknięta`}>
+              Poziom Stop Loss ({currCode})
             </label>
             <div className="relative">
               <input
@@ -299,7 +336,7 @@ export const TabRankingCalculator: React.FC<TabRankingCalculatorProps> = ({
                 onChange={(e) => setStopLossPrice(Math.max(0.01, parseFloat(e.target.value) || 0))}
                 className="w-full bg-slate-950 border border-rose-800/60 rounded-xl px-3.5 py-2 text-sm text-rose-400 font-mono focus:outline-none focus:border-rose-500"
               />
-              <span className="absolute right-3.5 top-2.5 text-xs text-rose-500 font-mono">zł</span>
+              <span className="absolute right-3.5 top-2.5 text-xs text-rose-500 font-mono">{currSymbol}</span>
             </div>
           </div>
         </div>
@@ -315,17 +352,17 @@ export const TabRankingCalculator: React.FC<TabRankingCalculatorProps> = ({
               {calculatedPosition.shares} <span className="text-xs text-slate-400 font-normal">szt.</span>
             </span>
             <span className="text-[10px] text-slate-500 font-sans">
-              Ekspozycja: {calculatedPosition.totalExposurePln.toLocaleString('pl-PL')} PLN
+              Ekspozycja: {calculatedPosition.totalExposureDisplay.toLocaleString('pl-PL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {currCode}
             </span>
           </div>
 
           <div
             className="bg-rose-950/20 border border-rose-800/40 rounded-xl p-3.5"
-            title="Maksymalna kwota w PLN, jaką możesz stracić przy uderzeniu w Stop Loss"
+            title={`Maksymalna kwota w ${currCode}, jaką możesz stracić przy uderzeniu w Stop Loss`}
           >
             <span className="text-[11px] text-rose-300 block font-sans">Maksymalna Strata (SL)</span>
             <span className="text-xl font-black text-rose-400 mt-1 block">
-              -{calculatedPosition.maxLossPln.toFixed(2)} <span className="text-xs font-normal">PLN</span>
+              -{calculatedPosition.maxLossDisplay.toFixed(2)} <span className="text-xs font-normal">{currCode}</span>
             </span>
             <span className="text-[10px] text-rose-500 font-sans">
               Ryzyko: {calculatedPosition.effectiveRiskPercent}% kapitału
@@ -338,7 +375,7 @@ export const TabRankingCalculator: React.FC<TabRankingCalculatorProps> = ({
           >
             <span className="text-[11px] text-emerald-300 block font-sans">Oczekiwany Zysk (Multi-TP)</span>
             <span className="text-xl font-black text-emerald-400 mt-1 block">
-              +{calculatedPosition.totalExpectedProfitPln.toFixed(2)} <span className="text-xs font-normal">PLN</span>
+              +{calculatedPosition.totalExpectedProfitDisplay.toFixed(2)} <span className="text-xs font-normal">{currCode}</span>
             </span>
             <span className="text-[10px] text-emerald-500 font-sans">
               Średnia ważona z TP1/TP2/TP3
@@ -347,7 +384,7 @@ export const TabRankingCalculator: React.FC<TabRankingCalculatorProps> = ({
 
           <div
             className="bg-slate-950/80 border border-slate-800 rounded-xl p-3.5"
-            title="Stosunek zysku do ryzyka: ile złotych zysku przypada na każdą ryzykowną złotówkę"
+            title="Stosunek zysku do ryzyka: ile jednostek zysku przypada na każdą ryzykowną jednostkę"
           >
             <span className="text-[11px] text-slate-400 block font-sans">Stosunek Zysku do Ryzyka (R:R)</span>
             <span className="text-xl font-black text-indigo-400 mt-1 block">
@@ -366,10 +403,11 @@ export const TabRankingCalculator: React.FC<TabRankingCalculatorProps> = ({
             <select
               value={selectedPortfolioId}
               onChange={(e) => setSelectedPortfolioId(e.target.value)}
+              title="Wybierz docelowy portfel, do którego trafi skalkulowana pozycja"
               className="bg-slate-950 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-white"
             >
               {portfolios.map(p => (
-                <option key={p.id} value={p.id}>{p.name} ({p.currentBalance.toLocaleString('pl-PL')} PLN)</option>
+                <option key={p.id} value={p.id}>{p.name} ({fmtMoney(p.currentBalance)})</option>
               ))}
             </select>
           </div>
@@ -417,6 +455,7 @@ export const TabRankingCalculator: React.FC<TabRankingCalculatorProps> = ({
               <input
                 type="text"
                 placeholder="Szukaj waloru / surowca..."
+                title="Wyszukaj spółkę, sektor, symbol lub formację świecową"
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 className="bg-slate-950 border border-slate-800 rounded-xl pl-9 pr-3 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 w-40 sm:w-52"
@@ -428,7 +467,7 @@ export const TabRankingCalculator: React.FC<TabRankingCalculatorProps> = ({
               <button
                 onClick={() => scrollMarkets('left')}
                 title="Przewiń segmenty w lewo (<)"
-                className="p-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 transition-colors"
+                className="p-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 transition-colors cursor-pointer"
               >
                 <ChevronLeft className="w-3.5 h-3.5" />
               </button>
@@ -441,6 +480,7 @@ export const TabRankingCalculator: React.FC<TabRankingCalculatorProps> = ({
                   <button
                     key={m}
                     onClick={() => setMarketFilter(m)}
+                    title={m === 'ALL' ? 'Pokaż wszystkie segmenty rynku' : `Filtruj tabelę po segmencie ${m}`}
                     className={`px-2.5 py-1 rounded-lg font-semibold transition-all shrink-0 cursor-pointer ${
                       marketFilter === m ? 'bg-emerald-600 text-white' : 'text-slate-400 hover:text-slate-200'
                     }`}
@@ -453,7 +493,7 @@ export const TabRankingCalculator: React.FC<TabRankingCalculatorProps> = ({
               <button
                 onClick={() => scrollMarkets('right')}
                 title="Przewiń segmenty w prawo (>)"
-                className="p-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 transition-colors"
+                className="p-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 transition-colors cursor-pointer"
               >
                 <ChevronRight className="w-3.5 h-3.5" />
               </button>
@@ -520,10 +560,10 @@ export const TabRankingCalculator: React.FC<TabRankingCalculatorProps> = ({
                 <th
                   onClick={() => toggleSort('price')}
                   className="pb-3 px-3 cursor-pointer hover:text-white"
-                  title="Kliknij, aby posortować po kursie"
+                  title={`Kliknij, aby posortować po kursie (${currCode})`}
                 >
                   <div className="flex items-center gap-1">
-                    <span>Kurs (PLN)</span>
+                    <span>Kurs ({currCode})</span>
                     <ArrowUpDown className="w-3 h-3" />
                   </div>
                 </th>
@@ -540,10 +580,10 @@ export const TabRankingCalculator: React.FC<TabRankingCalculatorProps> = ({
                 <th
                   onClick={() => toggleSort('turnoverPln')}
                   className="pb-3 px-3 cursor-pointer hover:text-white"
-                  title="Kliknij, aby posortować po wolumenie obrotu w PLN"
+                  title={`Kliknij, aby posortować po wolumenie obrotu w ${currCode}`}
                 >
                   <div className="flex items-center gap-1">
-                    <span>Obrót (PLN)</span>
+                    <span>Obrót ({currCode})</span>
                     <ArrowUpDown className="w-3 h-3" />
                   </div>
                 </th>
@@ -601,10 +641,13 @@ export const TabRankingCalculator: React.FC<TabRankingCalculatorProps> = ({
                   return 'bg-slate-800 text-slate-300 border-slate-700';
                 };
 
+                const turnoverConverted = fromPln(stock.turnoverPln);
+
                 return (
                   <tr
                     key={stock.symbol}
                     onClick={() => onSelectSymbol(stock.symbol)}
+                    title={`Kliknij, aby wybrać ${stock.cleanSymbol} do kalkulatora pozycji`}
                     className={`cursor-pointer transition-colors ${
                       isSelected ? 'bg-rose-950/40' : 'hover:bg-slate-800/40'
                     }`}
@@ -633,13 +676,13 @@ export const TabRankingCalculator: React.FC<TabRankingCalculatorProps> = ({
                     </td>
 
                     {/* Analyst Recommendation */}
-                    <td className="py-3 px-3 font-sans" title={`Cena docelowa analityków: ${stock.analystTargetPrice ? `${stock.analystTargetPrice} PLN` : 'Wycena rynkowa'}`}>
+                    <td className="py-3 px-3 font-sans" title={`Cena docelowa analityków: ${stock.analystTargetPrice ? fmtMoney(stock.analystTargetPrice) : 'Wycena rynkowa'}`}>
                       <div className="flex flex-col gap-0.5">
                         <span className={`px-2 py-0.5 rounded text-[10px] font-bold border max-w-fit ${getRecomBadge(stock.analystRecommendation)}`}>
                           {stock.analystRecommendation || 'KUPUJ (BUY)'}
                         </span>
                         {stock.analystTargetPrice && (
-                          <span className="text-[10px] text-slate-400">Cel: {stock.analystTargetPrice.toFixed(2)} zł</span>
+                          <span className="text-[10px] text-slate-400">Cel: {fmtMoney(stock.analystTargetPrice)}</span>
                         )}
                       </div>
                     </td>
@@ -652,7 +695,7 @@ export const TabRankingCalculator: React.FC<TabRankingCalculatorProps> = ({
                     </td>
 
                     <td className="py-3 px-3 font-bold text-white">
-                      {stock.price.toFixed(2)} zł
+                      {fmtMoney(stock.price)}
                     </td>
 
                     <td className="py-3 px-3">
@@ -662,9 +705,9 @@ export const TabRankingCalculator: React.FC<TabRankingCalculatorProps> = ({
                     </td>
 
                     <td className="py-3 px-3 text-slate-300">
-                      {stock.turnoverPln >= 1000000
-                        ? `${(stock.turnoverPln / 1000000).toFixed(1)} mln zł`
-                        : `${(stock.turnoverPln / 1000).toFixed(0)} tys zł`}
+                      {turnoverConverted >= 1000000
+                        ? `${(turnoverConverted / 1000000).toFixed(1)} mln ${currSymbol}`
+                        : `${(turnoverConverted / 1000).toFixed(0)} tys ${currSymbol}`}
                     </td>
 
                     <td className="py-3 px-3 text-slate-300">

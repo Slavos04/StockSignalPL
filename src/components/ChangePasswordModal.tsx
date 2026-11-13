@@ -43,7 +43,8 @@ export const ChangePasswordModal: React.FC<ChangePasswordModalProps> = ({ userna
       <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-md p-6 shadow-2xl relative text-slate-100">
         <button
           onClick={onClose}
-          className="absolute top-4 right-4 p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800"
+          title="Zamknij okno zmiany hasła"
+          className="absolute top-4 right-4 p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 cursor-pointer"
         >
           <X className="w-5 h-5" />
         </button>
@@ -113,12 +114,14 @@ export const ChangePasswordModal: React.FC<ChangePasswordModalProps> = ({ userna
             <button
               type="button"
               onClick={onClose}
+              title="Anuluj zmianę hasła"
               className="flex-1 py-2 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-sm font-semibold transition-colors cursor-pointer"
             >
               Anuluj
             </button>
             <button
               type="submit"
+              title="Zapisz nowe hasło do konta"
               className="flex-1 py-2 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-semibold transition-colors cursor-pointer"
             >
               Zapisz Nowe Hasło

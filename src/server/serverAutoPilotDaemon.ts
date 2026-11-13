@@ -246,9 +246,25 @@ export class ServerAutoPilotDaemon {
             pos.shares = Math.max(0, pos.shares - soldShares);
             pos.pnlPln = calcPnlPln(pos.shares);
 
-            const returnCash = Number((soldShares * pos.currentPrice).toFixed(2));
             const pnlPart = calcPnlPln(soldShares);
+            const returnCash = isShort
+              ? Number(Math.max(0, pos.entryPrice * soldShares + pnlPart).toFixed(2))
+              : Number((soldShares * pos.currentPrice).toFixed(2));
             portfolio.cashPln = Number(((portfolio.cashPln || 0) + returnCash).toFixed(2));
+
+            if (!portfolio.autoPilotLogs) portfolio.autoPilotLogs = [];
+            portfolio.autoPilotLogs.unshift({
+              id: nextId('log_srv_tp1', pos.ticker),
+              timestamp: dateStr,
+              ticker: pos.ticker,
+              action: 'SPRZEDAŻ_TP',
+              confidence: quote.trendScore || 100,
+              riskRewardRatio: 1.5,
+              reason: `Realizacja TP1 (33%): sprzedano ${soldShares} szt. po ${pos.currentPrice.toFixed(2)} zł (PnL: ${pnlPart >= 0 ? '+' : ''}${pnlPart.toFixed(2)} PLN). SL przestawiony na Break-Even.`,
+              portfolioId: portfolio.id,
+              portfolioName: portfolio.name
+            });
+            portfolio.autoPilotLogs = portfolio.autoPilotLogs.slice(0, 100);
 
             const tradeLog = {
               id: nextId('tr_srv_tp1', pos.ticker),
@@ -315,9 +331,25 @@ export class ServerAutoPilotDaemon {
             pos.shares = Math.max(0, pos.shares - soldShares);
             pos.pnlPln = calcPnlPln(pos.shares);
 
-            const returnCash = Number((soldShares * pos.currentPrice).toFixed(2));
             const pnlPart = calcPnlPln(soldShares);
+            const returnCash = isShort
+              ? Number(Math.max(0, pos.entryPrice * soldShares + pnlPart).toFixed(2))
+              : Number((soldShares * pos.currentPrice).toFixed(2));
             portfolio.cashPln = Number(((portfolio.cashPln || 0) + returnCash).toFixed(2));
+
+            if (!portfolio.autoPilotLogs) portfolio.autoPilotLogs = [];
+            portfolio.autoPilotLogs.unshift({
+              id: nextId('log_srv_tp2', pos.ticker),
+              timestamp: dateStr,
+              ticker: pos.ticker,
+              action: 'SPRZEDAŻ_TP',
+              confidence: quote.trendScore || 100,
+              riskRewardRatio: 2.4,
+              reason: `Realizacja TP2 (33%): sprzedano ${soldShares} szt. po ${pos.currentPrice.toFixed(2)} zł (PnL: ${pnlPart >= 0 ? '+' : ''}${pnlPart.toFixed(2)} PLN).`,
+              portfolioId: portfolio.id,
+              portfolioName: portfolio.name
+            });
+            portfolio.autoPilotLogs = portfolio.autoPilotLogs.slice(0, 100);
 
             const tradeLog = {
               id: nextId('tr_srv_tp2', pos.ticker),
@@ -377,10 +409,28 @@ export class ServerAutoPilotDaemon {
           } else if ((hitTp3 || hitSl) && pos.shares > 0) {
             // 3. Osiągnięcie TP3 lub STOP LOSS -> Pełne zamknięcie pozostałej pozycji
             const remainingShares = pos.shares;
-            const returnCash = Number((remainingShares * pos.currentPrice).toFixed(2));
             const pnlPart = calcPnlPln(remainingShares);
+            const returnCash = isShort
+              ? Number(Math.max(0, pos.entryPrice * remainingShares + pnlPart).toFixed(2))
+              : Number((remainingShares * pos.currentPrice).toFixed(2));
 
             portfolio.cashPln = Number(((portfolio.cashPln || 0) + returnCash).toFixed(2));
+
+            if (!portfolio.autoPilotLogs) portfolio.autoPilotLogs = [];
+            portfolio.autoPilotLogs.unshift({
+              id: nextId(hitTp3 ? 'log_srv_tp3' : 'log_srv_sl', pos.ticker),
+              timestamp: dateStr,
+              ticker: pos.ticker,
+              action: hitTp3 ? 'SPRZEDAŻ_TP' : 'SPRZEDAŻ_SL',
+              confidence: quote.trendScore || 100,
+              riskRewardRatio: hitTp3 ? 4.2 : 1,
+              reason: hitTp3
+                ? `Pełna realizacja TP3: zamknięto ${remainingShares} szt. po ${pos.currentPrice.toFixed(2)} zł (+${pnlPart.toFixed(2)} PLN).`
+                : `Aktywacja Stop Loss (${pos.stopLoss.toFixed(2)} zł): zamknięto ${remainingShares} szt. (Wynik: ${pnlPart.toFixed(2)} PLN).`,
+              portfolioId: portfolio.id,
+              portfolioName: portfolio.name
+            });
+            portfolio.autoPilotLogs = portfolio.autoPilotLogs.slice(0, 100);
 
             const tradeLog = {
               id: nextId(hitTp3 ? 'tr_srv_tp3' : 'tr_srv_sl', pos.ticker),
@@ -439,6 +489,66 @@ export class ServerAutoPilotDaemon {
             );
 
             continue;
+          } else if (portfolio.autoCutWeakConsensus && !isShort && quote.trendScore < 45 && pos.shares > 0) {
+            // 4. Auto-Cięcie przy słabym konsensusie (<45%)
+            const remainingShares = pos.shares;
+            const pnlPart = calcPnlPln(remainingShares);
+            const returnCash = Number((remainingShares * pos.currentPrice).toFixed(2));
+            portfolio.cashPln = Number(((portfolio.cashPln || 0) + returnCash).toFixed(2));
+
+            if (!portfolio.autoPilotLogs) portfolio.autoPilotLogs = [];
+            portfolio.autoPilotLogs.unshift({
+              id: nextId('log_srv_cut', pos.ticker),
+              timestamp: dateStr,
+              ticker: pos.ticker,
+              action: 'AUTO_CUT',
+              confidence: quote.trendScore,
+              riskRewardRatio: 0,
+              reason: `Auto-Cięcie Risk Management: Konsensus spadł do ${quote.trendScore}% (<45%). Zamknięto ${remainingShares} szt. po ${pos.currentPrice.toFixed(2)} zł.`,
+              portfolioId: portfolio.id,
+              portfolioName: portfolio.name
+            });
+            portfolio.autoPilotLogs = portfolio.autoPilotLogs.slice(0, 100);
+
+            const tradeLog = {
+              id: nextId('tr_srv_cut', pos.ticker),
+              date: dateStr,
+              ticker: pos.ticker,
+              name: pos.name,
+              type: 'SPRZEDAŻ',
+              positionSide: pos.positionSide || 'LONG',
+              pricePln: pos.currentPrice,
+              shares: remainingShares,
+              totalPln: returnCash,
+              resultPln: pnlPart,
+              resultPercent: pos.pnlPercent,
+              strategyId: portfolio.id,
+              reason: `Serwer 24/7 Auto-Cięcie: Konsensus dla ${pos.ticker} spadł do ${quote.trendScore}% (<45%).`,
+              status: pnlPart >= 0 ? 'ZYSK (TP)' : 'STRATA (SL)'
+            };
+
+            await dbSaveTrade(userId, tradeLog);
+            await dbSaveNotification(userId, {
+              id: nextId('notif_srv_cut', pos.ticker),
+              type: pnlPart >= 0 ? 'SELL_TP' : 'SELL_SL',
+              title: '🤖 Serwer 24/7: Auto-Cięcie Konsensusu',
+              message: `Zamknięto ${pos.ticker} (${remainingShares} szt.) — konsensus spadł do ${quote.trendScore}% (<45%).`,
+              ticker: pos.ticker,
+              portfolioName: portfolio.name,
+              portfolioId: portfolio.id,
+              shares: remainingShares,
+              pricePln: pos.currentPrice,
+              totalPln: returnCash,
+              resultPln: pnlPart,
+              timestamp: dateStr,
+              executedAtIso: now.toISOString(),
+              source: 'SERVER_DAEMON',
+              read: false
+            });
+
+            portfolioChanged = true;
+            totalOrdersExecuted++;
+            continue;
           }
 
           remainingPositions.push(pos);
@@ -457,7 +567,29 @@ export class ServerAutoPilotDaemon {
           : 0;
         const maxDdCap = portfolio.drawdownLockCap !== undefined ? portfolio.drawdownLockCap : -15;
 
-        if (currentDd > maxDdCap) {
+        if (currentDd <= maxDdCap) {
+          if (!portfolio.drawdownLockActive) {
+            portfolio.drawdownLockActive = true;
+            if (!portfolio.autoPilotLogs) portfolio.autoPilotLogs = [];
+            portfolio.autoPilotLogs.unshift({
+              id: nextId('log_srv_dd', 'DRAWDOWN'),
+              timestamp: dateStr,
+              ticker: 'DRAWDOWN_LOCK',
+              action: 'POMINIĘTO',
+              confidence: 0,
+              riskRewardRatio: 0,
+              reason: `Blokada Osuwiska Kapitału: Spadek (${currentDd.toFixed(1)}%) przekroczył próg (${maxDdCap}%). Wstrzymano nowe zakupy.`,
+              portfolioId: portfolio.id,
+              portfolioName: portfolio.name
+            });
+            portfolio.autoPilotLogs = portfolio.autoPilotLogs.slice(0, 100);
+            portfolioChanged = true;
+          }
+        } else {
+          if (portfolio.drawdownLockActive) {
+            portfolio.drawdownLockActive = false;
+            portfolioChanged = true;
+          }
           const maxPos = portfolio.autoPilotMaxPositions || 5;
           const minConf = portfolio.autoPilotMinConfidence || 76;
 

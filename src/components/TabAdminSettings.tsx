@@ -871,6 +871,7 @@ XAU KUPUJ Cena: 16133.00 Target: 18500.00`
               <div className="flex items-center gap-2 bg-slate-900 p-1 rounded-lg border border-slate-800">
                 <button
                   onClick={() => setImportMode('bulk')}
+                  title="Wklej feed z wieloma rekomendacjami naraz (StockWatch, Telegram)"
                   className={`px-3 py-1 rounded-md font-bold transition-all cursor-pointer ${
                     importMode === 'bulk'
                       ? 'bg-teal-500 text-slate-950 shadow-md'
@@ -881,6 +882,7 @@ XAU KUPUJ Cena: 16133.00 Target: 18500.00`
                 </button>
                 <button
                   onClick={() => setImportMode('single')}
+                  title="Wprowadź ręcznie pojedynczą rekomendację analityczną"
                   className={`px-3 py-1 rounded-md font-bold transition-all cursor-pointer ${
                     importMode === 'single'
                       ? 'bg-teal-500 text-slate-950 shadow-md'
@@ -919,6 +921,7 @@ XAU KUPUJ Cena: 16133.00 Target: 18500.00`
                   <div className="flex flex-wrap gap-1.5 mb-2">
                     <button
                       type="button"
+                      title="Wstaw przykładowy feed z forum StockWatch.pl"
                       onClick={() => {
                         setBulkSource('StockWatch.pl Forum - Wyceny Społeczności');
                         setBulkText(
@@ -936,6 +939,7 @@ XTB KUPUJ Cena: 78.00 Target: 105.00 (StockWatch Forum: Rekordowe przyrosty klie
                     </button>
                     <button
                       type="button"
+                      title="Wstaw przykładowe sygnały z kanału Telegram GPW & Surowce"
                       onClick={() => {
                         setBulkSource('Telegram: GPW Signals Institutional');
                         setBulkText(
@@ -977,12 +981,14 @@ BRENT KUPUJ Cena: 378.00 Target: 440.00`
                   <button
                     type="button"
                     onClick={() => setIsAddModalOpen(false)}
+                    title="Anuluj i zamknij okno importu"
                     className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold transition-colors cursor-pointer"
                   >
                     Zamknij
                   </button>
                   <button
                     type="submit"
+                    title="Przetwórz wklejony tekst i dodaj wykryte rekomendacje do audytu"
                     className="px-5 py-2 rounded-xl bg-teal-500 hover:bg-teal-400 text-slate-950 font-black flex items-center gap-2 shadow-lg transition-all cursor-pointer"
                   >
                     <Send className="w-4 h-4" />
@@ -1095,12 +1101,14 @@ BRENT KUPUJ Cena: 378.00 Target: 440.00`
                   <button
                     type="button"
                     onClick={() => setIsAddModalOpen(false)}
+                    title="Anuluj dodawanie rekomendacji"
                     className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold transition-colors cursor-pointer"
                   >
                     Anuluj
                   </button>
                   <button
                     type="submit"
+                    title="Dodaj pojedynczą rekomendację do systemu"
                     className="px-5 py-2 rounded-xl bg-teal-500 hover:bg-teal-400 text-slate-950 font-black flex items-center gap-2 shadow-lg transition-all cursor-pointer"
                   >
                     <Send className="w-4 h-4" />
@@ -1183,12 +1191,14 @@ BRENT KUPUJ Cena: 378.00 Target: 440.00`
                 <button
                   type="button"
                   onClick={() => setEditingUser(null)}
-                  className="flex-1 py-2 rounded-xl bg-slate-800 text-slate-300"
+                  title="Anuluj edycję użytkownika"
+                  className="flex-1 py-2 rounded-xl bg-slate-800 text-slate-300 cursor-pointer"
                 >
                   Anuluj
                 </button>
                 <button
                   type="submit"
+                  title="Zapisz zmienione dane użytkownika"
                   className="flex-1 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold cursor-pointer transition-colors"
                 >
                   Zapisz Zmiany
@@ -1257,6 +1267,7 @@ BRENT KUPUJ Cena: 378.00 Target: 440.00`
                 <select
                   value={newRole}
                   onChange={(e) => setNewRole(e.target.value as any)}
+                  title="Wybierz poziom uprawnień nowego użytkownika"
                   className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white"
                 >
                   <option value="trader">Trader</option>
@@ -1269,12 +1280,14 @@ BRENT KUPUJ Cena: 378.00 Target: 440.00`
                 <button
                   type="button"
                   onClick={() => setShowAddUserModal(false)}
-                  className="flex-1 py-2 rounded-xl bg-slate-800 text-slate-300"
+                  title="Anuluj tworzenie nowego konta"
+                  className="flex-1 py-2 rounded-xl bg-slate-800 text-slate-300 cursor-pointer"
                 >
                   Anuluj
                 </button>
                 <button
                   type="submit"
+                  title="Utwórz nowe konto inwestora"
                   className="flex-1 py-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-semibold cursor-pointer transition-all shadow-md shadow-emerald-950/40"
                 >
                   Utwórz Konto

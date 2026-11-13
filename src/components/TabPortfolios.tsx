@@ -12,8 +12,9 @@ import {
   CartesianGrid,
   ReferenceLine
 } from 'recharts';
-import { PortfolioStrategy, TradeRecord, StockQuote, PositionItem, HistoricalBar } from '../types/stock';
+import { PortfolioStrategy, TradeRecord, StockQuote, PositionItem, HistoricalBar, AppCurrency } from '../types/stock';
 import { PortfolioService } from '../services/portfolioService';
+import { SettingsService } from '../services/settingsService';
 import { parsePolishDateTimeToMs } from '../utils/dateTime';
 import { CreatePortfolioModal } from './CreatePortfolioModal';
 import { EditPortfolioModal } from './EditPortfolioModal';
@@ -47,6 +48,8 @@ interface TabPortfoliosProps {
   trades: TradeRecord[];
   onTradesUpdate: (trades: TradeRecord[]) => void;
   stocks: StockQuote[];
+  currency?: AppCurrency;
+  usdPlnRate?: number;
 }
 
 export type TimeRange = '1D' | '3D' | '1W' | '2W' | '1M' | '3M' | '6M' | 'ALL';
@@ -155,11 +158,13 @@ const CandlestickBar = (props: any) => {
  */
 function generateDailyPortfolioPoints(
   monthlyData: { date: string; portfolioVal: number; wig20Val: number }[],
-  createdAt?: string
+  createdAt?: string,
+  liveEndPort?: number
 ) {
   if (!monthlyData || monthlyData.length === 0) return [];
 
   const now = new Date();
+  const todayIso = now.toLocaleDateString('en-CA', { timeZone: 'Europe/Warsaw' });
   let createdDate: Date;
   
   if (createdAt) {
@@ -183,14 +188,14 @@ function generateDailyPortfolioPoints(
 
   const dailyPoints: { date: string; portfolioVal: number; wig20Val: number }[] = [];
   const startPort = monthlyData[0].portfolioVal;
-  const endPort = monthlyData[monthlyData.length - 1].portfolioVal;
+  const endPort = liveEndPort !== undefined ? liveEndPort : monthlyData[monthlyData.length - 1].portfolioVal;
   const startWig = monthlyData[0].wig20Val;
   const endWig = monthlyData[monthlyData.length - 1].wig20Val;
 
   for (let i = daysSinceCreation; i >= 0; i--) {
     const dateObj = new Date(now.getTime() - i * 24 * 60 * 60 * 1000);
     const dayOfWeek = dateObj.getDay();
-    if (dayOfWeek === 0 || dayOfWeek === 6) continue;
+    if (i !== 0 && (dayOfWeek === 0 || dayOfWeek === 6)) continue;
 
     const progress = (daysSinceCreation - i) / daysSinceCreation;
     const targetPort = startPort + (endPort - startPort) * Math.pow(progress, 0.95);
@@ -203,7 +208,7 @@ function generateDailyPortfolioPoints(
     const ptPort = i === 0 ? endPort : Math.round(targetPort + noisePort);
     const ptWig = i === 0 ? endWig : Math.round(targetWig + noiseWig);
 
-    const dateStr = dateObj.toISOString().split('T')[0];
+    const dateStr = i === 0 ? todayIso : dateObj.toLocaleDateString('en-CA', { timeZone: 'Europe/Warsaw' });
     dailyPoints.push({
       date: dateStr,
       portfolioVal: ptPort,
@@ -353,7 +358,7 @@ function generatePortfolioPointsForTimeRange(
 function generateOpenPositionsChartData(
   positions: PositionItem[],
   range: TimeRange,
-  portfolioId: string
+  _portfolioId: string
 ) {
   const COLORS = ['#10b981', '#3b82f6', '#f59e0b', '#8b5cf6', '#ec4899', '#06b6d4', '#84cc16', '#ef4444'];
 
@@ -372,7 +377,7 @@ function generateOpenPositionsChartData(
   }));
 
   const now = new Date();
-  const nowDateStr = now.toISOString().split('T')[0];
+  const nowDateStr = now.toLocaleDateString('en-CA', { timeZone: 'Europe/Warsaw' });
 
   const daysMap: Record<TimeRange, number> = {
     '1D': 1,
@@ -386,6 +391,13 @@ function generateOpenPositionsChartData(
   };
 
   let pts: any[] = [];
+
+  const calcValuation = (pos: PositionItem, price: number) => {
+    if (pos.positionSide === 'SHORT') {
+      return Number(Math.max(0, pos.entryPrice * pos.shares + (pos.entryPrice - price) * pos.shares).toFixed(2));
+    }
+    return Number((pos.shares * price).toFixed(2));
+  };
 
   if (range === '1D') {
     const hours = [
@@ -412,13 +424,15 @@ function generateOpenPositionsChartData(
           calcPrice = Number((openPrice + (currentPrice - openPrice) * progress + wave).toFixed(2));
         }
 
-        const valuePln = Number((pos.shares * calcPrice).toFixed(2));
+        const valuePln = calcValuation(pos, calcPrice);
         const pnlPln = isShort
           ? Number(((pos.entryPrice - calcPrice) * pos.shares).toFixed(2))
           : Number(((calcPrice - pos.entryPrice) * pos.shares).toFixed(2));
-        const pnlPercent = isShort
-          ? Number((((pos.entryPrice - calcPrice) / pos.entryPrice) * 100).toFixed(2))
-          : Number((((calcPrice - pos.entryPrice) / pos.entryPrice) * 100).toFixed(2));
+        const pnlPercent = pos.entryPrice > 0
+          ? isShort
+            ? Number((((pos.entryPrice - calcPrice) / pos.entryPrice) * 100).toFixed(2))
+            : Number((((calcPrice - pos.entryPrice) / pos.entryPrice) * 100).toFixed(2))
+          : 0;
 
         row[pos.ticker] = valuePln;
         row[pos.id] = valuePln;
@@ -434,12 +448,12 @@ function generateOpenPositionsChartData(
 
     for (let i = daysBack; i >= 0; i--) {
       const d = new Date(now.getTime() - i * 24 * 3600 * 1000);
-      if (d.getDay() === 0 || d.getDay() === 6) continue;
-      const dStr = d.toISOString().split('T')[0];
+      if (i !== 0 && (d.getDay() === 0 || d.getDay() === 6)) continue;
+      const dStr = i === 0 ? nowDateStr : d.toLocaleDateString('en-CA', { timeZone: 'Europe/Warsaw' });
 
       const row: any = { date: dStr };
 
-      positions.forEach((pos, pIdx) => {
+      positions.forEach((pos) => {
         const entryTime = new Date(pos.entryDate || nowDateStr).getTime();
         const ptTime = d.getTime();
         const isShort = pos.positionSide === 'SHORT';
@@ -458,13 +472,15 @@ function generateOpenPositionsChartData(
           calcPrice = Number((pos.entryPrice + (pos.currentPrice - pos.entryPrice) * Math.pow(progress, 0.9) + wave).toFixed(2));
         }
 
-        const valuePln = Number((pos.shares * calcPrice).toFixed(2));
+        const valuePln = calcValuation(pos, calcPrice);
         const pnlPln = isShort
           ? Number(((pos.entryPrice - calcPrice) * pos.shares).toFixed(2))
           : Number(((calcPrice - pos.entryPrice) * pos.shares).toFixed(2));
-        const pnlPercent = isShort
-          ? Number((((pos.entryPrice - calcPrice) / pos.entryPrice) * 100).toFixed(2))
-          : Number((((calcPrice - pos.entryPrice) / pos.entryPrice) * 100).toFixed(2));
+        const pnlPercent = pos.entryPrice > 0
+          ? isShort
+            ? Number((((pos.entryPrice - calcPrice) / pos.entryPrice) * 100).toFixed(2))
+            : Number((((calcPrice - pos.entryPrice) / pos.entryPrice) * 100).toFixed(2))
+          : 0;
 
         row[pos.ticker] = valuePln;
         row[pos.id] = valuePln;
@@ -494,7 +510,7 @@ function generateBarsForTimeRange(
   stockQuote?: StockQuote
 ): HistoricalBar[] {
   const now = new Date();
-  const dateStr = now.toISOString().split('T')[0];
+  const dateStr = now.toLocaleDateString('en-CA', { timeZone: 'Europe/Warsaw' });
   const tickerSeed = ticker.split('').reduce((acc, c, i) => acc + c.charCodeAt(0) * (i + 1), 0);
 
   // Pobierz realne parametry sesji ze StockQuote
@@ -511,7 +527,6 @@ function generateBarsForTimeRange(
     : Number((Math.min(openPrice, currentPrice) * (1 - (seededRandom(tickerSeed + 41) * 0.012 + 0.006))).toFixed(2));
 
   if (range === '1D') {
-    // 12 świec sesji dzisiejszej (09:00 - 17:00)
     const hours = ['09:00', '09:30', '10:00', '10:30', '11:00', '11:30', '12:00', '13:00', '14:00', '15:00', '16:00', '17:00'];
     const totalBars = hours.length;
     const intradayBars: HistoricalBar[] = [];
@@ -522,27 +537,23 @@ function generateBarsForTimeRange(
       const time = hours[index];
       const isLast = index === totalBars - 1;
       const progress = index / (totalBars - 1);
-
       const open = prevBarClose;
       
       let close: number;
       if (isLast) {
-        // Tylko ostatnia świeca reaguje na żywo na bieżący kurs rynkowy
-        close = currentPrice;
+        close = Number(currentPrice.toFixed(2));
       } else {
-        // Poprzednie świece są deterministycznie zamrożone - nie drgają przy re-renderze
         const sessionPath = openPrice + (currentPrice - openPrice) * Math.pow(progress, 0.95);
         const wave = Math.sin(index * 0.75 + (tickerSeed % 7)) * (Math.max(0.4, (highPrice - lowPrice) * 0.32));
         const swing = (seededRandom(tickerSeed + index * 31) - 0.48) * (Math.max(0.25, (highPrice - lowPrice) * 0.22));
         close = Number((sessionPath + wave + swing).toFixed(2));
         close = Math.max(lowPrice + 0.05, Math.min(highPrice - 0.05, close));
-      }
 
-      // Wyraźny korpus (min. 0.3% wartości waloru)
-      const minBodySize = Math.max(0.25, currentPrice * 0.004);
-      if (Math.abs(close - open) < minBodySize * 0.4) {
-        const dir = (tickerSeed + index) % 2 === 0 ? 1 : -1;
-        close = Number((open + dir * minBodySize).toFixed(2));
+        const minBodySize = Math.max(0.25, currentPrice * 0.004);
+        if (Math.abs(close - open) < minBodySize * 0.4) {
+          const dir = (tickerSeed + index) % 2 === 0 ? 1 : -1;
+          close = Number((open + dir * minBodySize).toFixed(2));
+        }
       }
 
       const candleBody = Math.abs(close - open);
@@ -556,6 +567,7 @@ function generateBarsForTimeRange(
       if (isLast) {
         high = Math.max(high, currentPrice, highPrice * 0.999);
         low = Math.min(low, currentPrice, lowPrice * 1.001);
+        close = Number(currentPrice.toFixed(2));
       }
 
       intradayBars.push({
@@ -563,7 +575,7 @@ function generateBarsForTimeRange(
         open: Number(open.toFixed(2)),
         high: Number(high.toFixed(2)),
         low: Number(Math.max(0.01, low).toFixed(2)),
-        close: Number(close.toFixed(2)),
+        close,
         volume: Math.floor(seededRandom(tickerSeed + index * 73) * 45000) + 12000
       });
 
@@ -574,38 +586,42 @@ function generateBarsForTimeRange(
   }
 
   if (range === '3D') {
-    // 3 dni sesyjne x 4 świece = 12 świec
+    // Zawsze 3 dni zakończone dniem dzisiejszym (ostatnia świeca = aktualny kurs dzisiejszy)
     const bars3d: HistoricalBar[] = [];
     const times = ['09:30', '12:00', '14:30', '16:45'];
+
+    const days3: string[] = [dateStr];
+    for (let offset = 1; days3.length < 3 && offset <= 10; offset++) {
+      const d = new Date(now.getTime() - offset * 24 * 3600 * 1000);
+      if (d.getDay() === 0 || d.getDay() === 6) continue;
+      days3.unshift(d.toLocaleDateString('en-CA', { timeZone: 'Europe/Warsaw' }));
+    }
+
     const basePrice3d = Number((openPrice * 0.985).toFixed(2));
     let prevBarClose = basePrice3d;
     let step = 0;
-    const totalSteps = 3 * times.length;
+    const totalSteps = days3.length * times.length;
 
-    for (let day = 2; day >= 0; day--) {
-      const d = new Date(now.getTime() - day * 24 * 3600 * 1000);
-      if (d.getDay() === 0 || d.getDay() === 6) continue;
-      const dStr = d.toISOString().split('T')[0];
-
+    days3.forEach((dStr) => {
       times.forEach((t) => {
         const isLast = step === totalSteps - 1;
-        const progress = step / (totalSteps - 1);
+        const progress = step / Math.max(1, totalSteps - 1);
         const open = prevBarClose;
 
         let close: number;
         if (isLast) {
-          close = currentPrice;
+          close = Number(currentPrice.toFixed(2));
         } else {
           const idealPath = basePrice3d + (currentPrice - basePrice3d) * Math.pow(progress, 0.95);
           const wave = Math.sin(step * 0.65 + (tickerSeed % 5)) * (Math.max(0.5, (highPrice - lowPrice) * 0.35));
           const swing = (seededRandom(tickerSeed + step * 23) - 0.48) * (Math.max(0.3, (highPrice - lowPrice) * 0.25));
           close = Number((idealPath + wave + swing).toFixed(2));
-        }
 
-        const minBodySize = Math.max(0.28, currentPrice * 0.005);
-        if (Math.abs(close - open) < minBodySize * 0.4) {
-          const dir = (tickerSeed + step) % 2 === 0 ? 1 : -1;
-          close = Number((open + dir * minBodySize).toFixed(2));
+          const minBodySize = Math.max(0.28, currentPrice * 0.005);
+          if (Math.abs(close - open) < minBodySize * 0.4) {
+            const dir = (tickerSeed + step) % 2 === 0 ? 1 : -1;
+            close = Number((open + dir * minBodySize).toFixed(2));
+          }
         }
 
         const candleBody = Math.abs(close - open);
@@ -613,61 +629,88 @@ function generateBarsForTimeRange(
         const topWick = Number((seededRandom(tickerSeed + step * 37) * wickSpan + 0.15).toFixed(2));
         const bottomWick = Number((seededRandom(tickerSeed + step * 49) * wickSpan + 0.15).toFixed(2));
 
-        const high = Number((Math.max(open, close) + topWick).toFixed(2));
-        const low = Number((Math.max(0.01, Math.min(open, close) - bottomWick)).toFixed(2));
+        let high = Number((Math.max(open, close) + topWick).toFixed(2));
+        let low = Number((Math.max(0.01, Math.min(open, close) - bottomWick)).toFixed(2));
+        if (isLast) {
+          high = Number(Math.max(high, currentPrice).toFixed(2));
+          low = Number(Math.min(low, currentPrice).toFixed(2));
+          close = Number(currentPrice.toFixed(2));
+        }
 
         bars3d.push({
           date: `${dStr.slice(5)} ${t}`,
           open: Number(open.toFixed(2)),
           high,
           low,
-          close: Number(close.toFixed(2)),
+          close,
           volume: Math.floor(seededRandom(tickerSeed + step * 57) * 40000) + 8000
         });
 
         prevBarClose = close;
         step++;
       });
-    }
+    });
     return bars3d;
   }
 
-  return filterPointsByTimeRange(baseBars, range);
+  // Dla 1W, 2W, 1M, 3M, 6M, ALL: zakotwicz ostatni słupek na dniu dzisiejszym z dokładnym aktualnym kursem
+  const anchoredBars = baseBars.map(b => ({ ...b }));
+  if (anchoredBars.length > 0) {
+    const lastIdx = anchoredBars.length - 1;
+    const last = anchoredBars[lastIdx];
+    const cleanCurr = Number(currentPrice.toFixed(2));
+    if (last.date === dateStr) {
+      last.close = cleanCurr;
+      last.high = Number(Math.max(last.high, cleanCurr).toFixed(2));
+      last.low = Number(Math.min(last.low, cleanCurr).toFixed(2));
+    } else {
+      anchoredBars.push({
+        date: dateStr,
+        open: Number((last.close || openPrice).toFixed(2)),
+        high: Number(Math.max(last.close || openPrice, cleanCurr, highPrice).toFixed(2)),
+        low: Number(Math.min(last.close || openPrice, cleanCurr, lowPrice).toFixed(2)),
+        close: cleanCurr,
+        volume: stockQuote?.volume || last.volume || 15000
+      });
+    }
+  }
+  return filterPointsByTimeRange(anchoredBars, range);
 }
 
-const CustomTooltip = ({ active, payload, label, displayMode }: any) => {
+const CustomTooltip = ({ active, payload, label, displayMode, currency = 'PLN', usdPlnRate = 3.97 }: any) => {
   if (!active || !payload || !payload.length) return null;
   const data = payload[0].payload;
 
   const portVal = displayMode === 'percent' ? data.portfolioReturn : data.portfolioVal;
   const wigVal = displayMode === 'percent' ? data.wig20Return : (data.scaledWig20Val ?? data.wig20Val);
 
-  // Układanie wskaźników wg wielkości wartości w danym punkcie (najwyższa wartość na samej górze)
+  const portMoney = SettingsService.formatMoney(data.portfolioVal, currency, usdPlnRate);
+  const wigMoney = SettingsService.formatMoney(data.scaledWig20Val ?? data.wig20Val, currency, usdPlnRate);
+  const rawWigMoney = SettingsService.formatMoney(data.wig20Val, currency, usdPlnRate);
+
   const items = [
     {
       id: 'portfolio',
       label: 'Portfel:',
       valNum: portVal,
-      colorClass: 'text-emerald-400',
       dotClass: 'bg-emerald-400',
       formatted: displayMode === 'percent'
-        ? `${data.portfolioReturn >= 0 ? '+' : ''}${data.portfolioReturn.toFixed(2)}% (${data.portfolioVal.toLocaleString('pl-PL')} PLN)`
-        : `${data.portfolioVal.toLocaleString('pl-PL')} PLN (${data.portfolioReturn >= 0 ? '+' : ''}${data.portfolioReturn.toFixed(2)}%)`
+        ? `${data.portfolioReturn >= 0 ? '+' : ''}${data.portfolioReturn.toFixed(2)}% (${portMoney})`
+        : `${portMoney} (${data.portfolioReturn >= 0 ? '+' : ''}${data.portfolioReturn.toFixed(2)}%)`
     },
     {
       id: 'wig20',
       label: 'WIG20:',
       valNum: wigVal,
-      colorClass: 'text-slate-400',
       dotClass: 'bg-slate-500',
       formatted: displayMode === 'percent'
-        ? `${data.wig20Return >= 0 ? '+' : ''}${data.wig20Return.toFixed(2)}% (${data.wig20Val.toLocaleString('pl-PL')} PLN)`
-        : `${(data.scaledWig20Val ?? data.wig20Val).toLocaleString('pl-PL')} PLN (${data.wig20Return >= 0 ? '+' : ''}${data.wig20Return.toFixed(2)}%)`
+        ? `${data.wig20Return >= 0 ? '+' : ''}${data.wig20Return.toFixed(2)}% (${rawWigMoney})`
+        : `${wigMoney} (${data.wig20Return >= 0 ? '+' : ''}${data.wig20Return.toFixed(2)}%)`
     }
   ].sort((a, b) => b.valNum - a.valNum);
 
   return (
-    <div className="bg-slate-900/95 border border-slate-700 p-3 rounded-xl shadow-2xl backdrop-blur-md text-xs font-mono z-50 min-w-[250px]">
+    <div className="bg-slate-900/95 border border-slate-700 p-3 rounded-xl shadow-2xl backdrop-blur-md text-xs font-mono z-50 min-w-[260px]">
       <div className="font-sans font-bold text-slate-200 border-b border-slate-800 pb-1 mb-2 flex justify-between items-center gap-4">
         <span>{label}</span>
         <span className="text-[10px] text-slate-400 font-normal">Krzywa Kapitału</span>
@@ -695,9 +738,10 @@ const CustomTooltip = ({ active, payload, label, displayMode }: any) => {
   );
 };
 
-const StockChartTooltip = ({ active, payload, label }: any) => {
+const StockChartTooltip = ({ active, payload, label, currency = 'PLN', usdPlnRate = 3.97 }: any) => {
   if (!active || !payload || !payload.length) return null;
   const data = payload[0].payload;
+  const fmt = (v: number) => SettingsService.formatMoney(v, currency, usdPlnRate);
   return (
     <div className="bg-slate-900/95 border border-slate-700 p-3 rounded-xl shadow-2xl backdrop-blur-md text-xs font-mono z-50">
       <div className="font-sans font-bold text-slate-200 border-b border-slate-800 pb-1 mb-1.5 flex justify-between items-center gap-4">
@@ -707,24 +751,24 @@ const StockChartTooltip = ({ active, payload, label }: any) => {
       <div className="space-y-1">
         <div className="flex justify-between gap-4 text-emerald-400">
           <span className="font-sans">Kurs (Close):</span>
-          <span className="font-bold">{data.close?.toFixed(2)} zł</span>
+          <span className="font-bold">{fmt(data.close ?? 0)}</span>
         </div>
-        {data.open && (
+        {data.open !== undefined && (
           <div className="flex justify-between gap-4 text-slate-400 text-[11px]">
             <span className="font-sans">Otwarcie (Open):</span>
-            <span>{data.open?.toFixed(2)} zł</span>
+            <span>{fmt(data.open)}</span>
           </div>
         )}
-        {data.high && (
+        {data.high !== undefined && (
           <div className="flex justify-between gap-4 text-slate-400 text-[11px]">
             <span className="font-sans">Maksimum (High):</span>
-            <span>{data.high?.toFixed(2)} zł</span>
+            <span>{fmt(data.high)}</span>
           </div>
         )}
-        {data.low && (
+        {data.low !== undefined && (
           <div className="flex justify-between gap-4 text-slate-400 text-[11px]">
             <span className="font-sans">Minimum (Low):</span>
-            <span>{data.low?.toFixed(2)} zł</span>
+            <span>{fmt(data.low)}</span>
           </div>
         )}
         {data.volume && (
@@ -753,23 +797,17 @@ function getPortfolioColor(id: string, index: number): string {
   return PORTFOLIO_COLORS[id] || FALLBACK_PALETTE[index % FALLBACK_PALETTE.length];
 }
 
-export function getCommodityUsdPrice(ticker: string, pricePln: number): string | null {
+export function getCommodityUsdPrice(ticker: string, pricePln: number, usdPlnRate: number = 3.97): string | null {
   const upper = ticker.toUpperCase();
-  if (upper.includes('XAU')) return `$${(pricePln / 3.95).toFixed(2)}`;
-  if (upper.includes('CB') || upper.includes('BRENT')) return `$${(pricePln / 4.09).toFixed(2)}`;
-  if (upper.includes('CL') || upper.includes('WTI')) return `$${(pricePln / 4.08).toFixed(2)}`;
-  if (upper.includes('XAG') || upper.includes('SREBRO')) return `$${(pricePln / 3.95).toFixed(2)}`;
-  if (upper.includes('XPT') || upper.includes('PLAT')) return `$${(pricePln / 4.00).toFixed(2)}`;
-  if (upper.includes('COPPER') || upper.includes('MIEDZ') || upper.includes('MIEDŹ')) return `$${(pricePln / 4.00).toFixed(2)}`;
-  if (upper.includes('NATGAS') || upper.includes('GAZ')) return `$${(pricePln / 4.00).toFixed(2)}`;
-  if (upper.includes('WHEAT') || upper.includes('PSZEN')) return `$${(pricePln / 4.00).toFixed(2)}`;
-  return null;
+  const isCommodity = ['XAU', 'CB', 'BRENT', 'CL', 'WTI', 'XAG', 'SREBRO', 'XPT', 'PLAT', 'COPPER', 'MIEDZ', 'MIEDŹ', 'HG', 'NATGAS', 'NG', 'GAZ', 'WHEAT', 'PSZEN', 'ZW'].some(k => upper.includes(k));
+  if (!isCommodity) return null;
+  const rate = usdPlnRate > 0 ? usdPlnRate : 3.97;
+  return `$${(pricePln / rate).toFixed(2)}`;
 }
 
-const AllPortfoliosTooltip = ({ active, payload, label, displayMode }: any) => {
+const AllPortfoliosTooltip = ({ active, payload, label, displayMode, currency = 'PLN', usdPlnRate = 3.97 }: any) => {
   if (!active || !payload || !payload.length) return null;
 
-  // Sortuj pozycje w legendzie zwięźle i dynamicznie wg wielkości wartości (najwyższa wartość na samej górze, najniższa na dole)
   const sortedPayload = [...payload].sort((a: any, b: any) => {
     const valA = typeof a.value === 'number' ? a.value : -Infinity;
     const valB = typeof b.value === 'number' ? b.value : -Infinity;
@@ -787,7 +825,7 @@ const AllPortfoliosTooltip = ({ active, payload, label, displayMode }: any) => {
           const val = item.value;
           const formatted = displayMode === 'percent'
             ? `${val >= 0 ? '+' : ''}${typeof val === 'number' ? val.toFixed(2) : val}%`
-            : `${typeof val === 'number' ? val.toLocaleString('pl-PL') : val} zł`;
+            : (typeof val === 'number' ? SettingsService.formatMoney(val, currency, usdPlnRate) : String(val));
           return (
             <div key={idx} className="flex items-center justify-between gap-4">
               <span className="flex items-center gap-1.5 text-slate-300 font-sans text-[11px] truncate max-w-[170px]">
@@ -805,7 +843,7 @@ const AllPortfoliosTooltip = ({ active, payload, label, displayMode }: any) => {
   );
 };
 
-const OpenPositionsTooltip = ({ active, payload, label, displayMode }: any) => {
+const OpenPositionsTooltip = ({ active, payload, label, displayMode, currency = 'PLN', usdPlnRate = 3.97 }: any) => {
   if (!active || !payload || !payload.length) return null;
 
   const sortedPayload = [...payload].sort((a: any, b: any) => {
@@ -832,10 +870,11 @@ const OpenPositionsTooltip = ({ active, payload, label, displayMode }: any) => {
           const price = item.payload[`${posId}_price`];
           const pnlPln = item.payload[`${posId}_pnlPln`];
           const pnlPct = item.payload[`${posId}_pnlPercent`];
+          const positionPln = item.payload[posId];
 
           const formattedVal = displayMode === 'percent'
             ? `${pnlPct >= 0 ? '+' : ''}${typeof pnlPct === 'number' ? pnlPct.toFixed(2) : pnlPct}%`
-            : `${typeof val === 'number' ? val.toLocaleString('pl-PL') : val} zł`;
+            : SettingsService.formatMoney(typeof val === 'number' ? val : Number(positionPln || 0), currency, usdPlnRate);
 
           return (
             <div key={idx} className="flex flex-col gap-0.5 border-b border-slate-800/50 pb-1.5 last:border-b-0 last:pb-0">
@@ -848,10 +887,10 @@ const OpenPositionsTooltip = ({ active, payload, label, displayMode }: any) => {
                   {formattedVal}
                 </span>
               </div>
-              <div className="flex items-center justify-between text-[10px] text-slate-400 font-mono pl-4">
-                <span>Kurs: {price?.toFixed(2)} zł</span>
+              <div className="flex items-center justify-between text-[10px] text-slate-400 font-mono pl-4 gap-2">
+                <span>Kurs: {SettingsService.formatMoney(price ?? 0, currency, usdPlnRate)}</span>
                 <span className={pnlPln >= 0 ? 'text-emerald-400' : 'text-rose-400'}>
-                  PnL: {pnlPln >= 0 ? '+' : ''}{pnlPln?.toLocaleString('pl-PL')} zł
+                  PnL: {SettingsService.formatSignedMoney(pnlPln ?? 0, currency, usdPlnRate)}
                 </span>
               </div>
             </div>
@@ -867,8 +906,25 @@ export const TabPortfolios: React.FC<TabPortfoliosProps> = ({
   onPortfoliosUpdate,
   trades,
   onTradesUpdate,
-  stocks
+  stocks,
+  currency = 'PLN',
+  usdPlnRate = 3.97
 }) => {
+  const fmtMoney = useCallback(
+    (plnVal: number, decimals: number = 2) => SettingsService.formatMoney(plnVal, currency, usdPlnRate, decimals),
+    [currency, usdPlnRate]
+  );
+  const fmtSignedMoney = useCallback(
+    (plnVal: number, decimals: number = 2) => SettingsService.formatSignedMoney(plnVal, currency, usdPlnRate, decimals),
+    [currency, usdPlnRate]
+  );
+  const fmtCompactMoney = useCallback(
+    (plnVal: number) => SettingsService.formatCompactMoney(plnVal, currency, usdPlnRate),
+    [currency, usdPlnRate]
+  );
+  const currCode = SettingsService.getCurrencyCode(currency);
+  const currSymbol = SettingsService.getCurrencySymbol(currency);
+
   const [selectedPortfolioId, setSelectedPortfolioId] = useState<string>(portfolios[0]?.id || 'wig20_bluechips');
   const [tradeFilter, setTradeFilter] = useState<'ALL' | 'AUTO-PILOT' | 'ZYSK (TP)' | 'STRATA (SL)' | 'REBALANCE'>('ALL');
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -965,14 +1021,15 @@ export const TabPortfolios: React.FC<TabPortfoliosProps> = ({
       totalPositionsCount,
       bestPortfolio
     };
-  }, [portfolios, getPortfolioLiveProfitPercent]);
+  }, [portfolios, getPortfolioLiveProfitPercent, getPositionValuationPln]);
 
   // Multi-portfolio comparative chart data (all portfolios plotted together)
   const allPortfoliosChartData = useMemo(() => {
     if (!portfolios || portfolios.length === 0) return [];
 
     const seriesByPortfolio = portfolios.map(p => {
-      const daily = generateDailyPortfolioPoints(p.historyData || [], p.createdAt);
+      const liveBal = getPortfolioLiveBalance(p);
+      const daily = generateDailyPortfolioPoints(p.historyData || [], p.createdAt, liveBal);
       const pts = generatePortfolioPointsForTimeRange(daily, portfolioTimeRange, p.id, p.createdAt);
       return { portfolio: p, pts };
     });
@@ -1015,7 +1072,7 @@ export const TabPortfolios: React.FC<TabPortfoliosProps> = ({
 
       return row;
     });
-  }, [portfolios, portfolioTimeRange, chartDisplayMode]);
+  }, [portfolios, portfolioTimeRange, chartDisplayMode, getPortfolioLiveBalance]);
 
   const handleClosePosition = (pos: PositionItem, portfolioId?: string) => {
     const targetPortId = portfolioId || currentPortfolio?.id;
@@ -1025,17 +1082,18 @@ export const TabPortfolios: React.FC<TabPortfoliosProps> = ({
       ? (pos.entryPrice - pos.currentPrice) * pos.shares
       : (pos.currentPrice - pos.entryPrice) * pos.shares;
     const pnl = Number(rawPnl.toFixed(2));
-    const pnlStr = `${pnl >= 0 ? '+' : ''}${pnl.toLocaleString('pl-PL')} PLN`;
-    const totalValStr = getPositionValuationPln(pos).toLocaleString('pl-PL');
+    const pnlStr = fmtSignedMoney(pnl);
+    const totalValStr = fmtMoney(getPositionValuationPln(pos));
+    const priceStr = fmtMoney(pos.currentPrice);
 
-    const confirmMsg = `Czy na pewno chcesz zamknąć pozycję ${pos.ticker} (${pos.name}) w portfelu "${targetPort?.name || targetPortId}"?\n\n• Wolumen: ${pos.shares} szt.\n• Aktualny kurs rynkowy: ${pos.currentPrice.toFixed(2)} zł\n• Wartość transakcji: ${totalValStr} PLN\n• Szacowany wynik PnL: ${pnlStr}\n\nŚrodki powrócą natychmiast do rezerwy gotówkowej portfela, a transakcja zostanie odnotowana w Dzienniku Tradera.`;
+    const confirmMsg = `Czy na pewno chcesz zamknąć pozycję ${pos.ticker} (${pos.name}) w portfelu "${targetPort?.name || targetPortId}"?\n\n• Wolumen: ${pos.shares} szt.\n• Aktualny kurs rynkowy: ${priceStr}\n• Wartość transakcji: ${totalValStr}\n• Szacowany wynik PnL: ${pnlStr}\n\nŚrodki powrócą natychmiast do rezerwy gotówkowej portfela, a transakcja zostanie odnotowana w Dzienniku Tradera.`;
 
     if (window.confirm(confirmMsg)) {
       const res = PortfolioService.closePosition(targetPortId, pos.id);
       if (res.success) {
         onPortfoliosUpdate([...PortfolioService.getPortfolios()]);
         onTradesUpdate([...PortfolioService.getTrades()]);
-        setToastMessage(`Pozycja ${pos.ticker} została pomyślnie zamknięta po kursie ${pos.currentPrice.toFixed(2)} zł (${pnlStr}).`);
+        setToastMessage(`Pozycja ${pos.ticker} została pomyślnie zamknięta po kursie ${priceStr} (${pnlStr}).`);
         if (pnl > 0) {
           confetti({ particleCount: 50, spread: 60, origin: { y: 0.6 } });
         }
@@ -1053,7 +1111,7 @@ export const TabPortfolios: React.FC<TabPortfoliosProps> = ({
   const [stockChartStyle, setStockChartStyle] = useState<'candlestick' | 'line'>('candlestick');
 
   // Open Positions Chart State
-  const [openPosDisplayMode, setOpenPosDisplayMode] = useState<'percent' | 'pln'>('percent');
+  const [openPosDisplayMode, setOpenPosDisplayMode] = useState<'percent' | 'pln'>('pln');
   const [openPosTimeRange, setOpenPosTimeRange] = useState<TimeRange>('1M');
 
   // Live calculations for current active portfolio
@@ -1077,11 +1135,11 @@ export const TabPortfolios: React.FC<TabPortfoliosProps> = ({
     return Number(((currentLiveProfitPln / currentPortfolio.initialCapital) * 100).toFixed(2));
   }, [currentPortfolio, currentLiveProfitPln]);
 
-  // Generate daily points for active portfolio
+  // Generate daily points for active portfolio anchored on live balance
   const dailyPortfolioPoints = useMemo(() => {
     if (!currentPortfolio || !currentPortfolio.historyData) return [];
-    return generateDailyPortfolioPoints(currentPortfolio.historyData, currentPortfolio.createdAt);
-  }, [currentPortfolio]);
+    return generateDailyPortfolioPoints(currentPortfolio.historyData, currentPortfolio.createdAt, currentLiveBalance);
+  }, [currentPortfolio, currentLiveBalance]);
 
   // Filtered daily / intraday points by selected time range
   const filteredDailyPoints = useMemo(() => {
@@ -1121,7 +1179,7 @@ export const TabPortfolios: React.FC<TabPortfoliosProps> = ({
     return generateOpenPositionsChartData(currentPortfolio.activePositions, openPosTimeRange, currentPortfolio.id);
   }, [currentPortfolio, openPosTimeRange]);
 
-  // Dynamic Y-axis domain calculation for open positions trajectory chart to zoom into micro price movements
+  // Dynamic Y-axis domain calculation for open positions trajectory chart (supports both % and amount mode)
   const openPosYDomain = useMemo(() => {
     if (!openPositionsChartData.chartData || openPositionsChartData.chartData.length === 0 || openPositionsChartData.positions.length === 0) {
       return ['auto', 'auto'];
@@ -1130,8 +1188,9 @@ export const TabPortfolios: React.FC<TabPortfoliosProps> = ({
     let maxVal = -Infinity;
     openPositionsChartData.chartData.forEach((row: any) => {
       openPositionsChartData.positions.forEach((pos) => {
-        const val = row[pos.ticker];
-        if (typeof val === 'number') {
+        const key = openPosDisplayMode === 'percent' ? `${pos.ticker}_percent` : pos.ticker;
+        const val = row[key];
+        if (typeof val === 'number' && isFinite(val)) {
           if (val < minVal) minVal = val;
           if (val > maxVal) maxVal = val;
         }
@@ -1139,11 +1198,15 @@ export const TabPortfolios: React.FC<TabPortfoliosProps> = ({
     });
     if (minVal === Infinity || maxVal === -Infinity) return ['auto', 'auto'];
     const spread = maxVal - minVal;
-    const padding = spread > 0 ? spread * 0.12 : minVal * 0.02;
+    if (openPosDisplayMode === 'percent') {
+      const padding = Math.max(spread * 0.15, 0.5);
+      return [Number((minVal - padding).toFixed(2)), Number((maxVal + padding).toFixed(2))];
+    }
+    const padding = spread > 0 ? spread * 0.12 : Math.max(10, Math.abs(minVal) * 0.02);
     const yMin = Math.max(0, Math.floor((minVal - padding) / 5) * 5);
     const yMax = Math.ceil((maxVal + padding) / 5) * 5;
     return [yMin, yMax];
-  }, [openPositionsChartData]);
+  }, [openPositionsChartData, openPosDisplayMode]);
 
   // Summary statistics for selected timeframe
   const timeframeStats = useMemo(() => {
@@ -1327,7 +1390,7 @@ export const TabPortfolios: React.FC<TabPortfoliosProps> = ({
           {/* Wszystkie Portfele (Zbiorczo) Tile */}
           <button
             onClick={() => setSelectedPortfolioId('ALL_PORTFOLIOS')}
-            title="Wszystkie Portfele na jednym wykresie • Zbiorcza analiza wyników w PLN i %"
+            title={`Wszystkie Portfele na jednym wykresie • Zbiorcza analiza wyników w ${currCode} i %`}
             className={`p-3 rounded-xl text-left transition-all border shrink-0 w-56 sm:w-64 cursor-pointer relative ${
               isAllPortfoliosSelected
                 ? 'bg-gradient-to-br from-emerald-950/70 to-teal-950/60 border-emerald-400 text-white shadow-lg shadow-emerald-950/40 ring-1 ring-emerald-400'
@@ -1347,7 +1410,7 @@ export const TabPortfolios: React.FC<TabPortfoliosProps> = ({
             </div>
             <h4 className="text-xs font-bold text-slate-100 truncate">Wszystkie Portfele ({portfolios.length})</h4>
             <div className="flex items-center justify-between text-[11px] font-mono text-slate-300 mt-1">
-              <span className="text-emerald-400 font-semibold">{aggregateStats.totalCurrentBalance.toLocaleString('pl-PL')} PLN</span>
+              <span className="text-emerald-400 font-semibold">{fmtMoney(aggregateStats.totalCurrentBalance, 0)}</span>
               <span className="text-[10px] text-slate-400 font-sans">Wykres Multi</span>
             </div>
           </button>
@@ -1360,7 +1423,7 @@ export const TabPortfolios: React.FC<TabPortfoliosProps> = ({
               <button
                 key={p.id}
                 onClick={() => setSelectedPortfolioId(p.id)}
-                title={`Portfel: ${p.name} • Saldo: ${liveBalance.toLocaleString('pl-PL')} PLN • Wynik: ${liveProfitPercent.toFixed(1)}%`}
+                title={`Portfel: ${p.name} • Saldo: ${fmtMoney(liveBalance, 0)} • Wynik: ${liveProfitPercent.toFixed(1)}%`}
                 className={`p-3 rounded-xl text-left transition-all border shrink-0 w-52 sm:w-60 cursor-pointer ${
                   isSelected
                     ? 'bg-emerald-950/50 border-emerald-500 text-white shadow-lg shadow-emerald-950/40 ring-1 ring-emerald-500'
@@ -1377,7 +1440,7 @@ export const TabPortfolios: React.FC<TabPortfoliosProps> = ({
                 </div>
                 <h4 className="text-xs font-bold text-slate-100 truncate">{p.name}</h4>
                 <div className="flex items-center justify-between text-[11px] font-mono text-slate-300 mt-1">
-                  <span>{liveBalance.toLocaleString('pl-PL')} PLN</span>
+                  <span>{fmtMoney(liveBalance, 0)}</span>
                   <div className="flex items-center gap-1">
                     {p.autoPilotEnabled && <span title="Auto-Pilot aktywny" className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>}
                     {p.telegramEnabled && <span title="Alerty Telegram aktywne" className="w-1.5 h-1.5 rounded-full bg-sky-400"></span>}
@@ -1412,37 +1475,49 @@ export const TabPortfolios: React.FC<TabPortfoliosProps> = ({
         <div className="space-y-6">
           {/* Top Aggregate Stats Bar */}
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3.5">
-            <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-4 shadow-lg">
+            <div
+              className="bg-slate-900/90 border border-slate-800 rounded-2xl p-4 shadow-lg"
+              title={`Łączna bieżąca wycena wszystkich aktywnych portfeli w ${currCode}`}
+            >
               <span className="text-[11px] text-slate-400 block font-sans">Łączny Kapitał Portfeli</span>
               <span className="text-lg sm:text-xl font-bold font-mono text-emerald-400 block mt-1">
-                {aggregateStats.totalCurrentBalance.toLocaleString('pl-PL')} PLN
+                {fmtMoney(aggregateStats.totalCurrentBalance)}
               </span>
               <span className="text-[10px] text-slate-500 font-sans block mt-0.5">
-                Kapitał pocz.: {aggregateStats.totalInitialCapital.toLocaleString('pl-PL')} PLN
+                Kapitał pocz.: {fmtMoney(aggregateStats.totalInitialCapital, 0)}
               </span>
             </div>
 
-            <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-4 shadow-lg">
+            <div
+              className="bg-slate-900/90 border border-slate-800 rounded-2xl p-4 shadow-lg"
+              title="Skumulowany wynik netto wszystkich portfeli względem kapitału startowego"
+            >
               <span className="text-[11px] text-slate-400 block font-sans">Łączny Wynik Funduszu</span>
               <span className={`text-lg sm:text-xl font-bold font-mono block mt-1 ${aggregateStats.totalProfitPln >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                {aggregateStats.totalProfitPln >= 0 ? '+' : ''}{aggregateStats.totalProfitPln.toLocaleString('pl-PL')} PLN
+                {fmtSignedMoney(aggregateStats.totalProfitPln)}
               </span>
               <span className={`text-[10px] font-mono font-semibold block mt-0.5 ${aggregateStats.totalProfitPercent >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
                 {aggregateStats.totalProfitPercent >= 0 ? '+' : ''}{aggregateStats.totalProfitPercent.toFixed(2)}% od startu
               </span>
             </div>
 
-            <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-4 shadow-lg">
+            <div
+              className="bg-slate-900/90 border border-slate-800 rounded-2xl p-4 shadow-lg"
+              title="Łączna wolna gotówka dostępna do nowych transakcji"
+            >
               <span className="text-[11px] text-slate-400 block font-sans">Rezerwa Gotówkowa</span>
               <span className="text-lg sm:text-xl font-bold font-mono text-sky-400 block mt-1">
-                {aggregateStats.totalCashPln.toLocaleString('pl-PL')} PLN
+                {fmtMoney(aggregateStats.totalCashPln)}
               </span>
               <span className="text-[10px] text-slate-500 font-sans block mt-0.5">
                 {aggregateStats.totalCurrentBalance > 0 ? ((aggregateStats.totalCashPln / aggregateStats.totalCurrentBalance) * 100).toFixed(1) : 0}% w gotówce
               </span>
             </div>
 
-            <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-4 shadow-lg">
+            <div
+              className="bg-slate-900/90 border border-slate-800 rounded-2xl p-4 shadow-lg"
+              title="Portfel z najwyższą aktualną stopą zwrotu ROI"
+            >
               <span className="text-[11px] text-slate-400 block font-sans">Portfel Lider</span>
               <span className="text-sm sm:text-base font-bold text-yellow-400 block mt-1 truncate" title={aggregateStats.bestPortfolio?.name}>
                 {aggregateStats.bestPortfolio?.name || 'Brak'}
@@ -1455,7 +1530,10 @@ export const TabPortfolios: React.FC<TabPortfoliosProps> = ({
               </span>
             </div>
 
-            <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-4 shadow-lg col-span-2 sm:col-span-1">
+            <div
+              className="bg-slate-900/90 border border-slate-800 rounded-2xl p-4 shadow-lg col-span-2 sm:col-span-1"
+              title="Łączna liczba otwartych pozycji we wszystkich portfelach"
+            >
               <span className="text-[11px] text-slate-400 block font-sans">Aktywne Pozycje Funduszu</span>
               <span className="text-lg sm:text-xl font-bold font-mono text-white block mt-1">
                 {aggregateStats.totalPositionsCount} spółek / surowców
@@ -1484,7 +1562,7 @@ export const TabPortfolios: React.FC<TabPortfoliosProps> = ({
               </div>
 
               <div className="flex flex-wrap items-center gap-2.5">
-                {/* % vs PLN Toggle */}
+                {/* % vs Currency Toggle */}
                 <div className="flex bg-slate-950 rounded-xl p-1 border border-slate-800 text-xs font-semibold">
                   <button
                     onClick={() => setChartDisplayMode('percent')}
@@ -1499,14 +1577,14 @@ export const TabPortfolios: React.FC<TabPortfoliosProps> = ({
                   </button>
                   <button
                     onClick={() => setChartDisplayMode('pln')}
-                    title="Pokaż nominalną wycenę portfeli w PLN (zł)"
+                    title={`Pokaż nominalną wycenę portfeli w ${currCode} (${currSymbol})`}
                     className={`px-3 py-1 rounded-lg transition-all cursor-pointer ${
                       chartDisplayMode === 'pln'
                         ? 'bg-emerald-600 text-white shadow-sm'
                         : 'text-slate-400 hover:text-slate-200'
                     }`}
                   >
-                    Wartość w zł (PLN)
+                    Wartość w {currSymbol} ({currCode})
                   </button>
                 </div>
 
@@ -1516,6 +1594,7 @@ export const TabPortfolios: React.FC<TabPortfoliosProps> = ({
                     <button
                       key={range}
                       onClick={() => setPortfolioTimeRange(range)}
+                      title={`Zakres porównania: ${range === 'ALL' ? 'Cała dostępna historia' : range}`}
                       className={`px-2.5 py-1 rounded-lg transition-all cursor-pointer ${
                         portfolioTimeRange === range
                           ? 'bg-emerald-600 text-white shadow-sm'
@@ -1560,10 +1639,10 @@ export const TabPortfolios: React.FC<TabPortfoliosProps> = ({
                         const abs = Math.abs(val);
                         return `${val >= 0 ? '+' : ''}${abs < 10 ? val.toFixed(1) : val.toFixed(0)}%`;
                       }
-                      return `${(val / 1000).toFixed(1)}k zł`;
+                      return fmtCompactMoney(val);
                     }}
                   />
-                  <Tooltip content={<AllPortfoliosTooltip displayMode={chartDisplayMode} />} />
+                  <Tooltip content={<AllPortfoliosTooltip displayMode={chartDisplayMode} currency={currency} usdPlnRate={usdPlnRate} />} />
 
                   {/* Portfolio Lines */}
                   {portfolios.map((p, idx) => (
@@ -1613,7 +1692,7 @@ export const TabPortfolios: React.FC<TabPortfoliosProps> = ({
                     <span className="font-mono text-white font-semibold">
                       {chartDisplayMode === 'percent'
                         ? `${livePct >= 0 ? '+' : ''}${livePct.toFixed(1)}%`
-                        : `${liveBal.toLocaleString('pl-PL')} zł`}
+                        : fmtMoney(liveBal, 0)}
                     </span>
                   </button>
                 );
@@ -1664,17 +1743,17 @@ export const TabPortfolios: React.FC<TabPortfoliosProps> = ({
                         </span>
                       </td>
                       <td className="py-3 px-3 text-right font-bold text-white">
-                        {getPortfolioLiveBalance(p).toLocaleString('pl-PL')} zł
+                        {fmtMoney(getPortfolioLiveBalance(p), 0)}
                       </td>
                       <td className="py-3 px-3 text-right text-slate-300">
-                        {p.cashPln.toLocaleString('pl-PL')} zł
+                        {fmtMoney(p.cashPln, 0)}
                       </td>
                       <td className="py-3 px-3 text-right text-slate-300">
-                        {((p.activePositions || []).reduce((s, pos) => s + getPositionValuationPln(pos), 0)).toLocaleString('pl-PL')} zł
+                        {fmtMoney((p.activePositions || []).reduce((s, pos) => s + getPositionValuationPln(pos), 0), 0)}
                       </td>
                       <td className="py-3 px-3 text-right">
                         <span className={`font-bold block ${getPortfolioLiveProfitPln(p) >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                          {getPortfolioLiveProfitPln(p) >= 0 ? '+' : ''}{getPortfolioLiveProfitPln(p).toLocaleString('pl-PL')} zł
+                          {fmtSignedMoney(getPortfolioLiveProfitPln(p), 0)}
                         </span>
                         <span className={`text-[10px] ${getPortfolioLiveProfitPercent(p) >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
                           {getPortfolioLiveProfitPercent(p) >= 0 ? '+' : ''}{getPortfolioLiveProfitPercent(p).toFixed(1)}%
@@ -1685,11 +1764,11 @@ export const TabPortfolios: React.FC<TabPortfoliosProps> = ({
                       </td>
                       <td className="py-3 px-3 text-center font-sans">
                         {p.autoPilotEnabled ? (
-                          <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-950 text-emerald-400 border border-emerald-800/60">
-                            WŁ (≥76%)
+                          <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-950 text-emerald-400 border border-emerald-800/60" title="Auto-Pilot włączony dla tego portfela">
+                            WŁ (&ge;{p.autoPilotMinConfidence ?? 76}%)
                           </span>
                         ) : (
-                          <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-800 text-slate-400">
+                          <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-800 text-slate-400" title="Auto-Pilot wyłączony">
                             WYŁ
                           </span>
                         )}
@@ -1697,6 +1776,7 @@ export const TabPortfolios: React.FC<TabPortfoliosProps> = ({
                       <td className="py-3 px-3 text-center font-sans">
                         <button
                           onClick={() => setSelectedPortfolioId(p.id)}
+                          title={`Otwórz szczegóły portfela "${p.name}"`}
                           className="px-2.5 py-1 rounded-lg text-[11px] font-bold bg-slate-800 hover:bg-emerald-600 text-slate-200 hover:text-white border border-slate-700 hover:border-emerald-500 transition-all cursor-pointer"
                         >
                           Szczegóły →
@@ -1745,45 +1825,52 @@ export const TabPortfolios: React.FC<TabPortfoliosProps> = ({
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-800/60 font-mono">
-                    {portfolios.flatMap(p =>
-                      (p.activePositions || []).slice(posPage * ITEMS_PER_PAGE, (posPage + 1) * ITEMS_PER_PAGE).map(pos => (
+                    {portfolios
+                      .flatMap(p => (p.activePositions || []).map(pos => ({ p, pos })))
+                      .slice(posPage * ITEMS_PER_PAGE, (posPage + 1) * ITEMS_PER_PAGE)
+                      .map(({ p, pos }) => (
                         <tr key={`${p.id}_${pos.id}`} className="hover:bg-slate-800/40 transition-colors">
                           <td className="py-3 px-3 font-sans">
                             <span className="text-xs font-semibold text-slate-300 block truncate max-w-[130px]">{p.name}</span>
                           </td>
                           <td className="py-3 px-3 font-sans">
-                            <span className="font-bold text-white block">{pos.ticker}</span>
+                            <div className="flex items-center gap-1">
+                              <span className="font-bold text-white block">{pos.ticker}</span>
+                              {pos.positionSide === 'SHORT' && (
+                                <span className="px-1 py-0.2 rounded text-[9px] font-bold bg-rose-950 text-rose-300 border border-rose-800">SHORT</span>
+                              )}
+                            </div>
                             <span className="text-[11px] text-slate-400 block truncate max-w-[90px]">{pos.name}</span>
                           </td>
                           <td className="py-3 px-3 text-slate-300">{pos.shares} szt.</td>
-                          <td className="py-3 px-3 text-slate-300">{pos.entryPrice.toFixed(2)} zł</td>
+                          <td className="py-3 px-3 text-slate-300">{fmtMoney(pos.entryPrice)}</td>
                           <td className="py-3 px-3 font-bold text-white">
-                            <div>{pos.currentPrice.toFixed(2)} zł</div>
-                            {getCommodityUsdPrice(pos.ticker, pos.currentPrice) && (
-                              <div className="text-[10px] text-amber-400 font-sans font-normal" title="Cena w dolarach (USD)">
-                                {getCommodityUsdPrice(pos.ticker, pos.currentPrice)}
+                            <div>{fmtMoney(pos.currentPrice)}</div>
+                            {currency === 'PLN' && getCommodityUsdPrice(pos.ticker, pos.currentPrice, usdPlnRate) && (
+                              <div className="text-[10px] text-amber-400 font-sans font-normal" title={`Cena w dolarach (kurs NBP 1$ = ${usdPlnRate.toFixed(2)} zł)`}>
+                                {getCommodityUsdPrice(pos.ticker, pos.currentPrice, usdPlnRate)}
                               </div>
                             )}
                           </td>
                           <td className="py-3 px-3">
                             <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${pos.tp1Reached ? 'bg-emerald-950 text-emerald-300 border border-emerald-700/60' : 'bg-slate-800 text-slate-400'}`}>
-                              {pos.targetPrice1.toFixed(2)} zł {pos.tp1Reached ? '✓' : ''}
+                              {fmtMoney(pos.targetPrice1)} {pos.tp1Reached ? '✓' : ''}
                             </span>
                           </td>
                           <td className="py-3 px-3">
                             <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${pos.tp2Reached ? 'bg-emerald-950 text-emerald-300 border border-emerald-700/60' : 'bg-slate-800 text-slate-400'}`}>
-                              {pos.targetPrice2.toFixed(2)} zł {pos.tp2Reached ? '✓' : ''}
+                              {fmtMoney(pos.targetPrice2)} {pos.tp2Reached ? '✓' : ''}
                             </span>
                           </td>
                           <td className="py-3 px-3">
                             <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${pos.tp3Reached ? 'bg-emerald-950 text-emerald-300 border border-emerald-700/60' : 'bg-slate-800 text-slate-400'}`}>
-                              {pos.targetPrice3.toFixed(2)} zł {pos.tp3Reached ? '✓' : ''}
+                              {fmtMoney(pos.targetPrice3)} {pos.tp3Reached ? '✓' : ''}
                             </span>
                           </td>
-                          <td className="py-3 px-3 text-rose-400">{pos.stopLoss.toFixed(2)} zł</td>
+                          <td className="py-3 px-3 text-rose-400">{fmtMoney(pos.stopLoss)}</td>
                           <td className="py-3 px-3 text-right">
                             <span className={`font-bold block ${pos.pnlPln >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                              {pos.pnlPln >= 0 ? '+' : ''}{pos.pnlPln.toLocaleString('pl-PL')} PLN
+                              {fmtSignedMoney(pos.pnlPln)}
                             </span>
                             <span className={`text-[10px] ${pos.pnlPercent >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
                               {pos.pnlPercent >= 0 ? '+' : ''}{pos.pnlPercent.toFixed(2)}%
@@ -1792,7 +1879,7 @@ export const TabPortfolios: React.FC<TabPortfoliosProps> = ({
                           <td className="py-3 px-3 text-center font-sans">
                             <button
                               onClick={() => handleClosePosition(pos, p.id)}
-                              title={`Zamknij natychmiast pozycję ${pos.ticker} z portfela "${p.name}" po kursie ${pos.currentPrice.toFixed(2)} zł`}
+                              title={`Zamknij natychmiast pozycję ${pos.ticker} z portfela "${p.name}" po kursie ${fmtMoney(pos.currentPrice)}`}
                               className="px-2.5 py-1 rounded-lg text-[11px] font-bold bg-rose-950/70 hover:bg-rose-900 text-rose-300 hover:text-white border border-rose-700/60 transition-all flex items-center justify-center gap-1 mx-auto cursor-pointer shadow-sm"
                             >
                               <X className="w-3.5 h-3.5 text-rose-400" />
@@ -1800,14 +1887,29 @@ export const TabPortfolios: React.FC<TabPortfoliosProps> = ({
                             </button>
                           </td>
                         </tr>
-                      ))
-                    )}
+                      ))}
                   </tbody>
                 </table>
                 <div className="flex items-center justify-center gap-2 pt-4">
-                  <button onClick={() => setPosPage(Math.max(0, posPage - 1))} disabled={posPage === 0} className="px-3 py-1 bg-slate-800 rounded-lg text-xs disabled:opacity-50">Poprzednia</button>
-                  <span className="text-xs text-slate-400">Strona {posPage + 1}</span>
-                  <button onClick={() => setPosPage(posPage + 1)} disabled={(posPage + 1) * ITEMS_PER_PAGE >= aggregateStats.totalPositionsCount} className="px-3 py-1 bg-slate-800 rounded-lg text-xs disabled:opacity-50">Następna</button>
+                  <button
+                    onClick={() => setPosPage(Math.max(0, posPage - 1))}
+                    disabled={posPage === 0}
+                    title="Poprzednia strona otwartych pozycji"
+                    className="px-3 py-1 bg-slate-800 hover:bg-slate-700 rounded-lg text-xs disabled:opacity-50 cursor-pointer"
+                  >
+                    Poprzednia
+                  </button>
+                  <span className="text-xs text-slate-400">
+                    Strona {posPage + 1} z {Math.max(1, Math.ceil(aggregateStats.totalPositionsCount / ITEMS_PER_PAGE))}
+                  </span>
+                  <button
+                    onClick={() => setPosPage(posPage + 1)}
+                    disabled={(posPage + 1) * ITEMS_PER_PAGE >= aggregateStats.totalPositionsCount}
+                    title="Następna strona otwartych pozycji"
+                    className="px-3 py-1 bg-slate-800 hover:bg-slate-700 rounded-lg text-xs disabled:opacity-50 cursor-pointer"
+                  >
+                    Następna
+                  </button>
                 </div>
               </div>
             )}
@@ -2204,12 +2306,12 @@ export const TabPortfolios: React.FC<TabPortfoliosProps> = ({
                                 </div>
                               </td>
                               <td className="py-3 px-3 text-slate-300">{pos.shares} szt.</td>
-                              <td className="py-3 px-3 text-slate-300">{pos.entryPrice.toFixed(2)} zł</td>
+                              <td className="py-3 px-3 text-slate-300">{fmtMoney(pos.entryPrice)}</td>
                               <td className="py-3 px-3 font-bold text-white">
-                                <div>{pos.currentPrice.toFixed(2)} zł</div>
-                                {getCommodityUsdPrice(pos.ticker, pos.currentPrice) && (
-                                  <div className="text-[10px] text-amber-400 font-sans font-normal" title="Cena w dolarach (USD)">
-                                    {getCommodityUsdPrice(pos.ticker, pos.currentPrice)}
+                                <div>{fmtMoney(pos.currentPrice)}</div>
+                                {currency === 'PLN' && getCommodityUsdPrice(pos.ticker, pos.currentPrice, usdPlnRate) && (
+                                  <div className="text-[10px] text-amber-400 font-sans font-normal" title={`Cena w dolarach (kurs NBP 1$ = ${usdPlnRate.toFixed(2)} zł)`}>
+                                    {getCommodityUsdPrice(pos.ticker, pos.currentPrice, usdPlnRate)}
                                   </div>
                                 )}
                               </td>
@@ -2224,7 +2326,7 @@ export const TabPortfolios: React.FC<TabPortfoliosProps> = ({
                                       : 'bg-slate-800 text-slate-400'
                                   }`}
                                 >
-                                  {pos.targetPrice1.toFixed(2)} zł {pos.tp1Reached ? '✓' : ''}
+                                  {fmtMoney(pos.targetPrice1)} {pos.tp1Reached ? '✓' : ''}
                                 </span>
                               </td>
 
@@ -2238,7 +2340,7 @@ export const TabPortfolios: React.FC<TabPortfoliosProps> = ({
                                       : 'bg-slate-800 text-slate-400'
                                   }`}
                                 >
-                                  {pos.targetPrice2.toFixed(2)} zł {pos.tp2Reached ? '✓' : ''}
+                                  {fmtMoney(pos.targetPrice2)} {pos.tp2Reached ? '✓' : ''}
                                 </span>
                               </td>
 
@@ -2252,17 +2354,17 @@ export const TabPortfolios: React.FC<TabPortfoliosProps> = ({
                                       : 'bg-slate-800 text-slate-400'
                                   }`}
                                 >
-                                  {pos.targetPrice3.toFixed(2)} zł {pos.tp3Reached ? '✓' : ''}
+                                  {fmtMoney(pos.targetPrice3)} {pos.tp3Reached ? '✓' : ''}
                                 </span>
                               </td>
 
                               {/* Stop Loss */}
-                              <td className="py-3 px-3 text-rose-400" title="Cena ucięcia strat">{pos.stopLoss.toFixed(2)} zł</td>
+                              <td className="py-3 px-3 text-rose-400" title="Cena ucięcia strat">{fmtMoney(pos.stopLoss)}</td>
 
                               {/* PnL */}
                               <td className="py-3 px-3 text-right">
                                 <span className={`font-bold block ${pos.pnlPln >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                                  {pos.pnlPln >= 0 ? '+' : ''}{pos.pnlPln.toLocaleString('pl-PL')} PLN
+                                  {fmtSignedMoney(pos.pnlPln)}
                                 </span>
                                 <span className={`text-[10px] ${pos.pnlPercent >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
                                   {pos.pnlPercent >= 0 ? '+' : ''}{pos.pnlPercent.toFixed(2)}%
@@ -2273,7 +2375,7 @@ export const TabPortfolios: React.FC<TabPortfoliosProps> = ({
                               <td className="py-3 px-3 text-center">
                                 <button
                                   onClick={() => handleClosePosition(pos)}
-                                  title={`Zamknij pozycję ${pos.ticker} po bieżącym kursie ${pos.currentPrice.toFixed(2)} zł`}
+                                  title={`Zamknij pozycję ${pos.ticker} po bieżącym kursie ${fmtMoney(pos.currentPrice)}`}
                                   className="px-2.5 py-1 rounded-lg text-[11px] font-bold bg-rose-950/70 hover:bg-rose-900 text-rose-300 hover:text-white border border-rose-700/60 transition-all flex items-center justify-center gap-1 mx-auto cursor-pointer shadow-sm"
                                 >
                                   <X className="w-3.5 h-3.5 text-rose-400" />
@@ -2319,7 +2421,7 @@ export const TabPortfolios: React.FC<TabPortfoliosProps> = ({
                                         const low = Number((Math.max(0.01, Math.min(open, close) - (1 - wickP) * wickBase)).toFixed(2));
 
                                         rawBars.push({
-                                          date: d.toISOString().split('T')[0],
+                                          date: d.toLocaleDateString('en-CA', { timeZone: 'Europe/Warsaw' }),
                                           open: Number(open.toFixed(2)),
                                           high,
                                           low,
@@ -2358,15 +2460,15 @@ export const TabPortfolios: React.FC<TabPortfoliosProps> = ({
                                             <div className="flex items-center gap-2">
                                               <span className="font-bold text-white text-sm">{pos.ticker} — {pos.name}</span>
                                               <span className="px-2 py-0.5 rounded text-xs font-mono font-bold bg-slate-800 text-emerald-400 border border-slate-700">
-                                                Aktualny Kurs: {pos.currentPrice.toFixed(2)} zł {getCommodityUsdPrice(pos.ticker, pos.currentPrice) ? `(${getCommodityUsdPrice(pos.ticker, pos.currentPrice)}) ` : ''}({pos.pnlPercent >= 0 ? '+' : ''}{pos.pnlPercent.toFixed(2)}%)
+                                                Aktualny Kurs: {fmtMoney(pos.currentPrice)} {currency === 'PLN' && getCommodityUsdPrice(pos.ticker, pos.currentPrice, usdPlnRate) ? `(${getCommodityUsdPrice(pos.ticker, pos.currentPrice, usdPlnRate)}) ` : ''}({pos.pnlPercent >= 0 ? '+' : ''}{pos.pnlPercent.toFixed(2)}%)
                                               </span>
                                             </div>
                                             <div className="flex flex-wrap items-center gap-3 text-[11px] text-slate-400 mt-1 font-mono">
-                                              <span>🔵 Wejście: <strong className="text-sky-400">{pos.entryPrice.toFixed(2)} zł</strong></span>
-                                              <span>🔴 SL: <strong className="text-rose-400">{pos.stopLoss.toFixed(2)} zł</strong></span>
-                                              <span>🟢 TP1: <strong className="text-emerald-400">{pos.targetPrice1.toFixed(2)} zł</strong> {pos.tp1Reached ? '✓' : ''}</span>
-                                              <span>🟢 TP2: <strong className="text-emerald-400">{pos.targetPrice2.toFixed(2)} zł</strong> {pos.tp2Reached ? '✓' : ''}</span>
-                                              <span>🟢 TP3: <strong className="text-emerald-400">{pos.targetPrice3.toFixed(2)} zł</strong> {pos.tp3Reached ? '✓' : ''}</span>
+                                              <span>🔵 Wejście: <strong className="text-sky-400">{fmtMoney(pos.entryPrice)}</strong></span>
+                                              <span>🔴 SL: <strong className="text-rose-400">{fmtMoney(pos.stopLoss)}</strong></span>
+                                              <span>🟢 TP1: <strong className="text-emerald-400">{fmtMoney(pos.targetPrice1)}</strong> {pos.tp1Reached ? '✓' : ''}</span>
+                                              <span>🟢 TP2: <strong className="text-emerald-400">{fmtMoney(pos.targetPrice2)}</strong> {pos.tp2Reached ? '✓' : ''}</span>
+                                              <span>🟢 TP3: <strong className="text-emerald-400">{fmtMoney(pos.targetPrice3)}</strong> {pos.tp3Reached ? '✓' : ''}</span>
                                             </div>
                                           </div>
 
@@ -2376,6 +2478,7 @@ export const TabPortfolios: React.FC<TabPortfoliosProps> = ({
                                             <div className="flex bg-slate-950 rounded-lg p-0.5 border border-slate-800 text-[10px]">
                                               <button
                                                 onClick={() => setStockChartStyle('candlestick')}
+                                                title="Wyświetl wykres świecowy (Open / High / Low / Close)"
                                                 className={`px-2 py-1 rounded font-bold transition-all cursor-pointer ${
                                                   stockChartStyle === 'candlestick'
                                                     ? 'bg-emerald-600 text-white shadow-sm'
@@ -2386,6 +2489,7 @@ export const TabPortfolios: React.FC<TabPortfoliosProps> = ({
                                               </button>
                                               <button
                                                 onClick={() => setStockChartStyle('line')}
+                                                title="Wyświetl wykres liniowy ceny zamknięcia"
                                                 className={`px-2 py-1 rounded font-bold transition-all cursor-pointer ${
                                                   stockChartStyle === 'line'
                                                     ? 'bg-emerald-600 text-white shadow-sm'
@@ -2402,6 +2506,7 @@ export const TabPortfolios: React.FC<TabPortfoliosProps> = ({
                                                 <button
                                                   key={r}
                                                   onClick={() => setStockTimeRange(r)}
+                                                  title={`Zakres notowań waloru: ${r === 'ALL' ? 'Cała historia' : r}`}
                                                   className={`px-2 py-1 rounded font-bold transition-all cursor-pointer ${
                                                     stockTimeRange === r
                                                       ? 'bg-emerald-600 text-white shadow-sm'
@@ -2448,25 +2553,25 @@ export const TabPortfolios: React.FC<TabPortfoliosProps> = ({
                                                 axisLine={{ stroke: '#334155' }}
                                                 domain={yDomain}
                                                 allowDataOverflow={true}
-                                                tickFormatter={(val) => `${val.toFixed(2)} zł`}
+                                                tickFormatter={(val) => fmtMoney(val, 2)}
                                               />
-                                              <Tooltip content={<StockChartTooltip />} />
+                                              <Tooltip content={<StockChartTooltip currency={currency} usdPlnRate={usdPlnRate} />} />
 
                                               {/* Reference Lines - tylko jeśli mieszczą się w widocznym zakresie cen świec */}
                                               {pos.entryPrice >= yMinVal && pos.entryPrice <= yMaxVal && (
-                                                <ReferenceLine y={pos.entryPrice} stroke="#3b82f6" strokeDasharray="4 4" ifOverflow="hidden" label={{ value: `WEJŚCIE ${pos.entryPrice.toFixed(2)}`, fill: '#3b82f6', fontSize: 9, position: 'right' }} />
+                                                <ReferenceLine y={pos.entryPrice} stroke="#3b82f6" strokeDasharray="4 4" ifOverflow="hidden" label={{ value: `WEJŚCIE ${fmtMoney(pos.entryPrice)}`, fill: '#3b82f6', fontSize: 9, position: 'right' }} />
                                               )}
                                               {pos.stopLoss >= yMinVal && pos.stopLoss <= yMaxVal && (
-                                                <ReferenceLine y={pos.stopLoss} stroke="#f43f5e" strokeDasharray="3 3" ifOverflow="hidden" label={{ value: `SL ${pos.stopLoss.toFixed(2)}`, fill: '#f43f5e', fontSize: 9, position: 'right' }} />
+                                                <ReferenceLine y={pos.stopLoss} stroke="#f43f5e" strokeDasharray="3 3" ifOverflow="hidden" label={{ value: `SL ${fmtMoney(pos.stopLoss)}`, fill: '#f43f5e', fontSize: 9, position: 'right' }} />
                                               )}
                                               {pos.targetPrice1 >= yMinVal && pos.targetPrice1 <= yMaxVal && (
-                                                <ReferenceLine y={pos.targetPrice1} stroke="#10b981" strokeDasharray="3 3" ifOverflow="hidden" label={{ value: `TP1 ${pos.targetPrice1.toFixed(2)}`, fill: '#10b981', fontSize: 9, position: 'right' }} />
+                                                <ReferenceLine y={pos.targetPrice1} stroke="#10b981" strokeDasharray="3 3" ifOverflow="hidden" label={{ value: `TP1 ${fmtMoney(pos.targetPrice1)}`, fill: '#10b981', fontSize: 9, position: 'right' }} />
                                               )}
                                               {pos.targetPrice2 >= yMinVal && pos.targetPrice2 <= yMaxVal && (
-                                                <ReferenceLine y={pos.targetPrice2} stroke="#10b981" strokeDasharray="3 3" ifOverflow="hidden" label={{ value: `TP2 ${pos.targetPrice2.toFixed(2)}`, fill: '#10b981', fontSize: 9, position: 'right' }} />
+                                                <ReferenceLine y={pos.targetPrice2} stroke="#10b981" strokeDasharray="3 3" ifOverflow="hidden" label={{ value: `TP2 ${fmtMoney(pos.targetPrice2)}`, fill: '#10b981', fontSize: 9, position: 'right' }} />
                                               )}
                                               {pos.targetPrice3 >= yMinVal && pos.targetPrice3 <= yMaxVal && (
-                                                <ReferenceLine y={pos.targetPrice3} stroke="#10b981" strokeDasharray="3 3" ifOverflow="hidden" label={{ value: `TP3 ${pos.targetPrice3.toFixed(2)}`, fill: '#10b981', fontSize: 9, position: 'right' }} />
+                                                <ReferenceLine y={pos.targetPrice3} stroke="#10b981" strokeDasharray="3 3" ifOverflow="hidden" label={{ value: `TP3 ${fmtMoney(pos.targetPrice3)}`, fill: '#10b981', fontSize: 9, position: 'right' }} />
                                               )}
 
                                               {stockChartStyle === 'candlestick' ? (
@@ -2480,7 +2585,7 @@ export const TabPortfolios: React.FC<TabPortfoliosProps> = ({
                                                 <Area
                                                   type="monotone"
                                                   dataKey="close"
-                                                  name="Kurs (zł)"
+                                                  name={`Kurs (${currSymbol})`}
                                                   stroke="#10b981"
                                                   strokeWidth={2}
                                                   fill={`url(#stockGradient_${pos.id})`}
@@ -2519,19 +2624,44 @@ export const TabPortfolios: React.FC<TabPortfoliosProps> = ({
                 </p>
               </div>
 
-              {/* Zakres czasu dla otwartych pozycji */}
-              <div className="flex bg-slate-950 rounded-xl p-1 border border-slate-800 text-xs">
-                {(['1D', '3D', '1W', '2W', '1M', '3M', '6M', 'ALL'] as const).map(range => (
+              <div className="flex flex-wrap items-center gap-2.5">
+                {/* Przełącznik Wartość kwotowa / Wartość procentowa */}
+                <div className="flex bg-slate-950 rounded-xl p-1 border border-slate-800 text-xs font-semibold">
                   <button
-                    key={range}
-                    onClick={() => setOpenPosTimeRange(range)}
-                    className={`px-3 py-1 rounded-lg font-semibold transition-all cursor-pointer ${
-                      openPosTimeRange === range ? 'bg-teal-600 text-white' : 'text-slate-400 hover:text-slate-200'
+                    onClick={() => setOpenPosDisplayMode('pln')}
+                    title={`Pokaż trajektorię wyceny otwartych pozycji kwotowo w ${currCode}`}
+                    className={`px-3 py-1 rounded-lg transition-all cursor-pointer ${
+                      openPosDisplayMode === 'pln' ? 'bg-teal-600 text-white shadow-sm' : 'text-slate-400 hover:text-slate-200'
                     }`}
                   >
-                    {range}
+                    Wartość ({currCode})
                   </button>
-                ))}
+                  <button
+                    onClick={() => setOpenPosDisplayMode('percent')}
+                    title="Pokaż stopę zwrotu (%) każdej otwartej pozycji względem ceny wejścia"
+                    className={`px-3 py-1 rounded-lg transition-all cursor-pointer ${
+                      openPosDisplayMode === 'percent' ? 'bg-teal-600 text-white shadow-sm' : 'text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    Zmiana (%)
+                  </button>
+                </div>
+
+                {/* Zakres czasu dla otwartych pozycji */}
+                <div className="flex bg-slate-950 rounded-xl p-1 border border-slate-800 text-xs">
+                  {(['1D', '3D', '1W', '2W', '1M', '3M', '6M', 'ALL'] as const).map(range => (
+                    <button
+                      key={range}
+                      onClick={() => setOpenPosTimeRange(range)}
+                      title={`Zakres trajektorii otwartych pozycji: ${range === 'ALL' ? 'Od otwarcia' : range}`}
+                      className={`px-2.5 py-1 rounded-lg font-semibold transition-all cursor-pointer ${
+                        openPosTimeRange === range ? 'bg-teal-600 text-white' : 'text-slate-400 hover:text-slate-200'
+                      }`}
+                    >
+                      {range}
+                    </button>
+                  ))}
+                </div>
               </div>
             </div>
 
@@ -2562,14 +2692,29 @@ export const TabPortfolios: React.FC<TabPortfoliosProps> = ({
                       axisLine={{ stroke: '#334155' }}
                       domain={openPosYDomain}
                       allowDataOverflow={true}
-                      tickFormatter={(val) => `${val.toLocaleString('pl-PL')} zł`}
+                      tickFormatter={(val) =>
+                        openPosDisplayMode === 'percent'
+                          ? `${val >= 0 ? '+' : ''}${Number(val).toFixed(1)}%`
+                          : fmtMoney(val, 0)
+                      }
                     />
-                    <Tooltip content={<OpenPositionsTooltip />} />
+                    <Tooltip
+                      content={
+                        <OpenPositionsTooltip
+                          displayMode={openPosDisplayMode}
+                          currency={currency}
+                          usdPlnRate={usdPlnRate}
+                        />
+                      }
+                    />
+                    {openPosDisplayMode === 'percent' && (
+                      <ReferenceLine y={0} stroke="#475569" strokeDasharray="3 3" />
+                    )}
                     {openPositionsChartData.positions.map((pos) => (
                       <Line
                         key={pos.id}
                         type="monotone"
-                        dataKey={pos.ticker}
+                        dataKey={openPosDisplayMode === 'percent' ? `${pos.ticker}_percent` : pos.ticker}
                         name={`${pos.ticker} (${pos.name})`}
                         stroke={pos.color}
                         strokeWidth={2}
@@ -2586,15 +2731,15 @@ export const TabPortfolios: React.FC<TabPortfoliosProps> = ({
           {/* Kafelek 3: Alokacja Aktywów & Zasady Strategii (Pełna Szerokość Okna) */}
           <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-6 shadow-xl">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              {/* Sekcja 1: Alokacja Aktywów w PLN */}
+              {/* Sekcja 1: Alokacja Aktywów */}
               <div>
-                <h3 className="text-sm font-bold text-white mb-4">Alokacja Aktywów w PLN</h3>
+                <h3 className="text-sm font-bold text-white mb-4">Alokacja Aktywów w {currCode}</h3>
                 <div className="space-y-3">
                   <div>
                     <div className="flex justify-between text-xs mb-1">
                       <span className="text-slate-400">Akcje & Kontrakty GPW</span>
                       <span className="font-mono text-white font-semibold">
-                        {currentOpenPositionsValue.toLocaleString('pl-PL')} PLN ({((currentOpenPositionsValue / (currentLiveBalance || 1)) * 100).toFixed(1)}%)
+                        {fmtMoney(currentOpenPositionsValue)} ({((currentOpenPositionsValue / (currentLiveBalance || 1)) * 100).toFixed(1)}%)
                       </span>
                     </div>
                     <div className="w-full h-2 rounded-full bg-slate-800 overflow-hidden">
@@ -2607,9 +2752,9 @@ export const TabPortfolios: React.FC<TabPortfoliosProps> = ({
 
                   <div>
                     <div className="flex justify-between text-xs mb-1">
-                      <span className="text-slate-400">Wolna Gotówka (PLN)</span>
+                      <span className="text-slate-400">Wolna Gotówka ({currCode})</span>
                       <span className="font-mono text-white font-semibold">
-                        {currentPortfolio.cashPln.toLocaleString('pl-PL')} PLN ({((currentPortfolio.cashPln / (currentLiveBalance || 1)) * 100).toFixed(1)}%)
+                        {fmtMoney(currentPortfolio.cashPln)} ({((currentPortfolio.cashPln / (currentLiveBalance || 1)) * 100).toFixed(1)}%)
                       </span>
                     </div>
                     <div className="w-full h-2 rounded-full bg-slate-800 overflow-hidden">
@@ -2739,6 +2884,7 @@ export const TabPortfolios: React.FC<TabPortfoliosProps> = ({
                 <button
                   key={f}
                   onClick={() => setTradeFilter(f)}
+                  title={`Filtruj dziennik tradera: ${f === 'ALL' ? 'Wszystkie operacje' : f}`}
                   className={`px-3 py-1 rounded-lg font-semibold transition-all cursor-pointer ${
                     tradeFilter === f ? 'bg-emerald-600 text-white' : 'text-slate-400 hover:text-slate-200'
                   }`}
@@ -2798,10 +2944,10 @@ export const TabPortfolios: React.FC<TabPortfoliosProps> = ({
                 <th
                   onClick={() => toggleTradeSort('pricePln')}
                   className="pb-3 px-3 cursor-pointer hover:text-white"
-                  title="Kliknij, aby posortować po cenie transakcji"
+                  title={`Kliknij, aby posortować po cenie transakcji (${currCode})`}
                 >
                   <div className="flex items-center gap-1">
-                    <span>Cena (PLN)</span>
+                    <span>Cena ({currCode})</span>
                     <ArrowUpDown className="w-3 h-3" />
                   </div>
                 </th>
@@ -2818,10 +2964,10 @@ export const TabPortfolios: React.FC<TabPortfoliosProps> = ({
                 <th
                   onClick={() => toggleTradeSort('totalPln')}
                   className="pb-3 px-3 cursor-pointer hover:text-white"
-                  title="Kliknij, aby posortować po wartości całkowitej"
+                  title={`Kliknij, aby posortować po wartości całkowitej (${currCode})`}
                 >
                   <div className="flex items-center gap-1">
-                    <span>Wartość (PLN)</span>
+                    <span>Wartość ({currCode})</span>
                     <ArrowUpDown className="w-3 h-3" />
                   </div>
                 </th>
@@ -2835,8 +2981,8 @@ export const TabPortfolios: React.FC<TabPortfoliosProps> = ({
                     <ArrowUpDown className="w-3 h-3" />
                   </div>
                 </th>
-                <th className="pb-3 px-3">Status</th>
-                <th className="pb-3 px-3">Uzasadnienie / Źródło</th>
+                <th className="pb-3 px-3" title="Status i tryb realizacji zlecenia (Auto-Pilot, Zysk TP, Strata SL, Rebalance)">Status</th>
+                <th className="pb-3 px-3" title="Szczegółowe uzasadnienie i źródło wykonania transakcji">Uzasadnienie / Źródło</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800/60 font-mono">
@@ -2865,13 +3011,13 @@ export const TabPortfolios: React.FC<TabPortfoliosProps> = ({
                           {t.type}
                         </span>
                       </td>
-                      <td className="py-3 px-3 text-slate-200">{t.pricePln.toFixed(2)} zł</td>
+                      <td className="py-3 px-3 text-slate-200">{fmtMoney(t.pricePln)}</td>
                       <td className="py-3 px-3 text-slate-300">{t.shares} szt.</td>
-                      <td className="py-3 px-3 text-slate-200">{t.totalPln.toLocaleString('pl-PL')} zł</td>
+                      <td className="py-3 px-3 text-slate-200">{fmtMoney(t.totalPln)}</td>
                       <td className="py-3 px-3">
                         {t.resultPln !== 0 ? (
                           <span className={`font-bold ${t.resultPln > 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                            {t.resultPln > 0 ? '+' : ''}{t.resultPln.toFixed(2)} zł ({t.resultPercent > 0 ? '+' : ''}{t.resultPercent.toFixed(1)}%)
+                            {fmtSignedMoney(t.resultPln)} ({t.resultPercent > 0 ? '+' : ''}{t.resultPercent.toFixed(1)}%)
                           </span>
                         ) : (
                           <span className="text-slate-500">—</span>
@@ -2892,9 +3038,25 @@ export const TabPortfolios: React.FC<TabPortfoliosProps> = ({
             </tbody>
           </table>
           <div className="flex items-center justify-center gap-2 pt-4">
-            <button onClick={() => setTradePage(Math.max(0, tradePage - 1))} disabled={tradePage === 0} className="px-3 py-1 bg-slate-800 rounded-lg text-xs disabled:opacity-50">Poprzednia</button>
-            <span className="text-xs text-slate-400">Strona {tradePage + 1} z {Math.max(1, Math.ceil(filteredAndSortedTrades.length / ITEMS_PER_PAGE))}</span>
-            <button onClick={() => setTradePage(tradePage + 1)} disabled={(tradePage + 1) * ITEMS_PER_PAGE >= filteredAndSortedTrades.length} className="px-3 py-1 bg-slate-800 rounded-lg text-xs disabled:opacity-50">Następna</button>
+            <button
+              onClick={() => setTradePage(Math.max(0, tradePage - 1))}
+              disabled={tradePage === 0}
+              title="Poprzednia strona historii zleceń"
+              className="px-3 py-1 bg-slate-800 hover:bg-slate-700 rounded-lg text-xs disabled:opacity-50 cursor-pointer"
+            >
+              Poprzednia
+            </button>
+            <span className="text-xs text-slate-400">
+              Strona {tradePage + 1} z {Math.max(1, Math.ceil(filteredAndSortedTrades.length / ITEMS_PER_PAGE))}
+            </span>
+            <button
+              onClick={() => setTradePage(tradePage + 1)}
+              disabled={(tradePage + 1) * ITEMS_PER_PAGE >= filteredAndSortedTrades.length}
+              title="Następna strona historii zleceń"
+              className="px-3 py-1 bg-slate-800 hover:bg-slate-700 rounded-lg text-xs disabled:opacity-50 cursor-pointer"
+            >
+              Następna
+            </button>
           </div>
         </div>
       </div>
@@ -2904,6 +3066,8 @@ export const TabPortfolios: React.FC<TabPortfoliosProps> = ({
         isOpen={isCreateModalOpen}
         onClose={() => setIsCreateModalOpen(false)}
         onPortfolioCreated={handlePortfolioCreated}
+        currency={currency}
+        usdPlnRate={usdPlnRate}
       />
 
       {/* Modal to Edit Portfolio Strategy & Allowed Markets */}
@@ -2916,6 +3080,8 @@ export const TabPortfolios: React.FC<TabPortfoliosProps> = ({
           setToastMessage(`Pomyślnie zaktualizowano strategię portfela "${updated.name}"`);
           setTimeout(() => setToastMessage(null), 4000);
         }}
+        currency={currency}
+        usdPlnRate={usdPlnRate}
       />
 
       {/* Smart Rebalance Modal */}
@@ -2924,10 +3090,12 @@ export const TabPortfolios: React.FC<TabPortfoliosProps> = ({
         stockQuotes={stocks}
         isOpen={isSmartRebalanceModalOpen}
         onClose={() => setIsSmartRebalanceModalOpen(false)}
-        onRebalanceComplete={(updated) => {
+        onRebalanceComplete={() => {
           onPortfoliosUpdate([...PortfolioService.getPortfolios()]);
           onTradesUpdate([...PortfolioService.getTrades()]);
         }}
+        currency={currency}
+        usdPlnRate={usdPlnRate}
       />
 
       {/* Auto-Pilot Audit Logs Modal */}

@@ -522,6 +522,7 @@ Wersja 1.0 (2026-11-04) - Oficjalne Wydanie StockSignalPl
 
           <button
             onClick={onClose}
+            title="Zamknij okno informacji o programie"
             className="p-2 text-slate-400 hover:text-white rounded-xl hover:bg-slate-800 transition-colors cursor-pointer"
           >
             <X className="w-5 h-5" />
@@ -532,6 +533,7 @@ Wersja 1.0 (2026-11-04) - Oficjalne Wydanie StockSignalPl
         <div className="flex border-b border-slate-800 px-6 bg-slate-950/40 text-xs">
           <button
             onClick={() => setActiveTab('info')}
+            title="Zobacz opis działania platformy i modułów"
             className={`py-3 px-4 font-bold border-b-2 transition-all flex items-center gap-2 cursor-pointer ${
               activeTab === 'info'
                 ? 'border-emerald-500 text-emerald-400'
@@ -543,6 +545,7 @@ Wersja 1.0 (2026-11-04) - Oficjalne Wydanie StockSignalPl
           </button>
           <button
             onClick={() => setActiveTab('changelog')}
+            title="Zobacz pełną historię zmian i wersji aplikacji"
             className={`py-3 px-4 font-bold border-b-2 transition-all flex items-center gap-2 cursor-pointer ${
               activeTab === 'changelog'
                 ? 'border-emerald-500 text-emerald-400'
