@@ -1,4 +1,4 @@
-import React, { useState, useRef, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import {
   ResponsiveContainer,
   ComposedChart,
@@ -909,11 +909,19 @@ export const TabPortfolios: React.FC<TabPortfoliosProps> = ({
   const [isSmartRebalanceModalOpen, setIsSmartRebalanceModalOpen] = useState<boolean>(false);
   const [isAutoPilotLogsModalOpen, setIsAutoPilotLogsModalOpen] = useState<boolean>(false);
 
+  // SHORT-aware position market valuation helper
+  const getPositionValuationPln = useCallback((pos: PositionItem) => {
+    if (pos.positionSide === 'SHORT') {
+      return Math.max(0, pos.entryPrice * pos.shares + (pos.entryPrice - pos.currentPrice) * pos.shares);
+    }
+    return pos.shares * pos.currentPrice;
+  }, []);
+
   // Live Balance Calculation helper for any portfolio
   const getPortfolioLiveBalance = useCallback((p: PortfolioStrategy) => {
-    const openVal = (p.activePositions || []).reduce((sum, pos) => sum + (pos.shares * pos.currentPrice), 0);
+    const openVal = (p.activePositions || []).reduce((sum, pos) => sum + getPositionValuationPln(pos), 0);
     return Number(((p.cashPln || 0) + openVal).toFixed(2));
-  }, []);
+  }, [getPositionValuationPln]);
 
   const getPortfolioLiveProfitPln = useCallback((p: PortfolioStrategy) => {
     const liveBal = getPortfolioLiveBalance(p);
@@ -930,7 +938,7 @@ export const TabPortfolios: React.FC<TabPortfoliosProps> = ({
   const aggregateStats = useMemo(() => {
     const totalCashPln = portfolios.reduce((acc, p) => acc + (p.cashPln || 0), 0);
     const totalPositionsValue = portfolios.reduce((acc, p) => {
-      const pVal = (p.activePositions || []).reduce((s, pos) => s + (pos.shares * pos.currentPrice), 0);
+      const pVal = (p.activePositions || []).reduce((s, pos) => s + getPositionValuationPln(pos), 0);
       return acc + pVal;
     }, 0);
     const totalCurrentBalance = totalCashPln + totalPositionsValue;
@@ -1013,9 +1021,12 @@ export const TabPortfolios: React.FC<TabPortfoliosProps> = ({
     const targetPortId = portfolioId || currentPortfolio?.id;
     if (!targetPortId) return;
     const targetPort = portfolios.find(p => p.id === targetPortId);
-    const pnl = Number(((pos.currentPrice - pos.entryPrice) * pos.shares).toFixed(2));
+    const rawPnl = pos.positionSide === 'SHORT'
+      ? (pos.entryPrice - pos.currentPrice) * pos.shares
+      : (pos.currentPrice - pos.entryPrice) * pos.shares;
+    const pnl = Number(rawPnl.toFixed(2));
     const pnlStr = `${pnl >= 0 ? '+' : ''}${pnl.toLocaleString('pl-PL')} PLN`;
-    const totalValStr = (pos.shares * pos.currentPrice).toLocaleString('pl-PL');
+    const totalValStr = getPositionValuationPln(pos).toLocaleString('pl-PL');
 
     const confirmMsg = `Czy na pewno chcesz zamknąć pozycję ${pos.ticker} (${pos.name}) w portfelu "${targetPort?.name || targetPortId}"?\n\n• Wolumen: ${pos.shares} szt.\n• Aktualny kurs rynkowy: ${pos.currentPrice.toFixed(2)} zł\n• Wartość transakcji: ${totalValStr} PLN\n• Szacowany wynik PnL: ${pnlStr}\n\nŚrodki powrócą natychmiast do rezerwy gotówkowej portfela, a transakcja zostanie odnotowana w Dzienniku Tradera.`;
 
@@ -1048,8 +1059,8 @@ export const TabPortfolios: React.FC<TabPortfoliosProps> = ({
   // Live calculations for current active portfolio
   const currentOpenPositionsValue = useMemo(() => {
     if (!currentPortfolio?.activePositions) return 0;
-    return currentPortfolio.activePositions.reduce((sum, pos) => sum + (pos.shares * pos.currentPrice), 0);
-  }, [currentPortfolio]);
+    return currentPortfolio.activePositions.reduce((sum, pos) => sum + getPositionValuationPln(pos), 0);
+  }, [currentPortfolio, getPositionValuationPln]);
 
   const currentLiveBalance = useMemo(() => {
     if (!currentPortfolio) return 100000;
@@ -1260,6 +1271,23 @@ export const TabPortfolios: React.FC<TabPortfoliosProps> = ({
       });
   }, [trades, tradeFilter, tradeSortField, tradeSortOrder, isAllPortfoliosSelected, currentPortfolio]);
 
+  // Reset pagination when switching portfolios or changing trade filters, and clamp out-of-bounds pages
+  useEffect(() => {
+    setTradePage(0);
+    setPosPage(0);
+  }, [selectedPortfolioId]);
+
+  useEffect(() => {
+    setTradePage(0);
+  }, [tradeFilter]);
+
+  useEffect(() => {
+    const maxPage = Math.max(0, Math.ceil(filteredAndSortedTrades.length / ITEMS_PER_PAGE) - 1);
+    if (tradePage > maxPage) {
+      setTradePage(maxPage);
+    }
+  }, [filteredAndSortedTrades.length, tradePage]);
+
   const toggleTradeSort = (field: typeof tradeSortField) => {
     if (tradeSortField === field) {
       setTradeSortOrder(tradeSortOrder === 'asc' ? 'desc' : 'asc');
@@ -1326,11 +1354,13 @@ export const TabPortfolios: React.FC<TabPortfoliosProps> = ({
 
           {portfolios.map(p => {
             const isSelected = p.id === selectedPortfolioId;
+            const liveBalance = getPortfolioLiveBalance(p);
+            const liveProfitPercent = getPortfolioLiveProfitPercent(p);
             return (
               <button
                 key={p.id}
                 onClick={() => setSelectedPortfolioId(p.id)}
-                title={`Portfel: ${p.name} • Saldo: ${p.currentBalance.toLocaleString('pl-PL')} PLN • Wynik: ${p.totalProfitPercent.toFixed(1)}%`}
+                title={`Portfel: ${p.name} • Saldo: ${liveBalance.toLocaleString('pl-PL')} PLN • Wynik: ${liveProfitPercent.toFixed(1)}%`}
                 className={`p-3 rounded-xl text-left transition-all border shrink-0 w-52 sm:w-60 cursor-pointer ${
                   isSelected
                     ? 'bg-emerald-950/50 border-emerald-500 text-white shadow-lg shadow-emerald-950/40 ring-1 ring-emerald-500'
@@ -1340,14 +1370,14 @@ export const TabPortfolios: React.FC<TabPortfoliosProps> = ({
                 <div className="flex items-center justify-between mb-1">
                   <span className="text-[10px] font-bold text-yellow-400 uppercase tracking-wider">{p.riskLevel}</span>
                   <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
-                    p.totalProfitPercent >= 0 ? 'bg-emerald-950 text-emerald-400 border border-emerald-800/50' : 'bg-rose-950 text-rose-400 border border-rose-800/50'
+                    liveProfitPercent >= 0 ? 'bg-emerald-950 text-emerald-400 border border-emerald-800/50' : 'bg-rose-950 text-rose-400 border border-rose-800/50'
                   }`}>
-                    {p.totalProfitPercent >= 0 ? '+' : ''}{p.totalProfitPercent.toFixed(1)}%
+                    {liveProfitPercent >= 0 ? '+' : ''}{liveProfitPercent.toFixed(1)}%
                   </span>
                 </div>
                 <h4 className="text-xs font-bold text-slate-100 truncate">{p.name}</h4>
                 <div className="flex items-center justify-between text-[11px] font-mono text-slate-300 mt-1">
-                  <span>{p.currentBalance.toLocaleString('pl-PL')} PLN</span>
+                  <span>{liveBalance.toLocaleString('pl-PL')} PLN</span>
                   <div className="flex items-center gap-1">
                     {p.autoPilotEnabled && <span title="Auto-Pilot aktywny" className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>}
                     {p.telegramEnabled && <span title="Alerty Telegram aktywne" className="w-1.5 h-1.5 rounded-full bg-sky-400"></span>}
@@ -1418,7 +1448,10 @@ export const TabPortfolios: React.FC<TabPortfoliosProps> = ({
                 {aggregateStats.bestPortfolio?.name || 'Brak'}
               </span>
               <span className="text-[10px] text-emerald-400 font-mono font-bold block mt-0.5">
-                +{aggregateStats.bestPortfolio?.totalProfitPercent.toFixed(1)}% zysku
+                {(() => {
+                  const pct = aggregateStats.bestPortfolio ? getPortfolioLiveProfitPercent(aggregateStats.bestPortfolio) : 0;
+                  return `${pct >= 0 ? '+' : ''}${pct.toFixed(1)}% zysku`;
+                })()}
               </span>
             </div>
 
@@ -1566,6 +1599,8 @@ export const TabPortfolios: React.FC<TabPortfoliosProps> = ({
               <span className="text-[11px] text-slate-400 font-sans mr-1">Legenda:</span>
               {portfolios.map((p, idx) => {
                 const color = getPortfolioColor(p.id, idx);
+                const liveBal = getPortfolioLiveBalance(p);
+                const livePct = getPortfolioLiveProfitPercent(p);
                 return (
                   <button
                     key={p.id}
@@ -1577,8 +1612,8 @@ export const TabPortfolios: React.FC<TabPortfoliosProps> = ({
                     <span className="text-slate-300 group-hover:text-white font-medium">{p.name}:</span>
                     <span className="font-mono text-white font-semibold">
                       {chartDisplayMode === 'percent'
-                        ? `${p.totalProfitPercent >= 0 ? '+' : ''}${p.totalProfitPercent.toFixed(1)}%`
-                        : `${p.currentBalance.toLocaleString('pl-PL')} zł`}
+                        ? `${livePct >= 0 ? '+' : ''}${livePct.toFixed(1)}%`
+                        : `${liveBal.toLocaleString('pl-PL')} zł`}
                     </span>
                   </button>
                 );
@@ -1635,7 +1670,7 @@ export const TabPortfolios: React.FC<TabPortfoliosProps> = ({
                         {p.cashPln.toLocaleString('pl-PL')} zł
                       </td>
                       <td className="py-3 px-3 text-right text-slate-300">
-                        {((p.activePositions || []).reduce((s, pos) => s + (pos.shares * pos.currentPrice), 0)).toLocaleString('pl-PL')} zł
+                        {((p.activePositions || []).reduce((s, pos) => s + getPositionValuationPln(pos), 0)).toLocaleString('pl-PL')} zł
                       </td>
                       <td className="py-3 px-3 text-right">
                         <span className={`font-bold block ${getPortfolioLiveProfitPln(p) >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
@@ -2559,13 +2594,13 @@ export const TabPortfolios: React.FC<TabPortfoliosProps> = ({
                     <div className="flex justify-between text-xs mb-1">
                       <span className="text-slate-400">Akcje & Kontrakty GPW</span>
                       <span className="font-mono text-white font-semibold">
-                        {currentPortfolio.allocatedPln.toLocaleString('pl-PL')} PLN ({((currentPortfolio.allocatedPln / (currentPortfolio.currentBalance || 1)) * 100).toFixed(1)}%)
+                        {currentOpenPositionsValue.toLocaleString('pl-PL')} PLN ({((currentOpenPositionsValue / (currentLiveBalance || 1)) * 100).toFixed(1)}%)
                       </span>
                     </div>
                     <div className="w-full h-2 rounded-full bg-slate-800 overflow-hidden">
                       <div
                         className="h-full bg-teal-500 rounded-full"
-                        style={{ width: `${Math.min(100, (currentPortfolio.allocatedPln / (currentPortfolio.currentBalance || 1)) * 100)}%` }}
+                        style={{ width: `${Math.min(100, (currentOpenPositionsValue / (currentLiveBalance || 1)) * 100)}%` }}
                       ></div>
                     </div>
                   </div>
@@ -2574,13 +2609,13 @@ export const TabPortfolios: React.FC<TabPortfoliosProps> = ({
                     <div className="flex justify-between text-xs mb-1">
                       <span className="text-slate-400">Wolna Gotówka (PLN)</span>
                       <span className="font-mono text-white font-semibold">
-                        {currentPortfolio.cashPln.toLocaleString('pl-PL')} PLN ({((currentPortfolio.cashPln / (currentPortfolio.currentBalance || 1)) * 100).toFixed(1)}%)
+                        {currentPortfolio.cashPln.toLocaleString('pl-PL')} PLN ({((currentPortfolio.cashPln / (currentLiveBalance || 1)) * 100).toFixed(1)}%)
                       </span>
                     </div>
                     <div className="w-full h-2 rounded-full bg-slate-800 overflow-hidden">
                       <div
                         className="h-full bg-emerald-500 rounded-full"
-                        style={{ width: `${Math.min(100, (currentPortfolio.cashPln / (currentPortfolio.currentBalance || 1)) * 100)}%` }}
+                        style={{ width: `${Math.min(100, (currentPortfolio.cashPln / (currentLiveBalance || 1)) * 100)}%` }}
                       ></div>
                     </div>
                   </div>
@@ -2690,7 +2725,9 @@ export const TabPortfolios: React.FC<TabPortfoliosProps> = ({
             <h3 className="text-base font-bold text-white flex items-center gap-2">
               <Clock className="w-4 h-4 text-emerald-400" />
               <span>Dziennik Tradera GPW (Historia Zleceń)</span>
-              <span className="text-xs font-normal text-slate-400">({trades.length} transakcji)</span>
+              <span className="text-xs font-normal text-slate-400">
+                ({filteredAndSortedTrades.length} transakcji{!isAllPortfoliosSelected ? ' w tym portfelu' : ''})
+              </span>
             </h3>
             <p className="text-xs text-slate-400">Pierwsza kolumna (Data) jest nieruchoma. Kliknij nagłówek kolumny, aby posortować.</p>
           </div>
@@ -2803,52 +2840,60 @@ export const TabPortfolios: React.FC<TabPortfoliosProps> = ({
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800/60 font-mono">
-              {filteredAndSortedTrades.slice(tradePage * ITEMS_PER_PAGE, (tradePage + 1) * ITEMS_PER_PAGE).map(t => {
-                return (
-                  <tr key={t.id} className="hover:bg-slate-800/40 transition-colors">
-                    {/* Sticky Column 1: Data i Godzina */}
-                    <td className="py-3 sticky left-0 z-10 bg-slate-900 px-3 text-slate-400 font-mono shadow-[2px_0_5px_rgba(0,0,0,0.3)]">
-                      {t.date}
-                    </td>
-                    <td className="py-3 px-3 font-sans">
-                      <span className="font-bold text-white block">{t.ticker}</span>
-                      <span className="text-[11px] text-slate-400 block truncate max-w-[120px]">{t.name}</span>
-                    </td>
-                    <td className="py-3 px-3 font-sans">
-                      <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                        t.type === 'KUPNO' ? 'bg-emerald-950 text-emerald-400' : 'bg-rose-950 text-rose-400'
-                      }`}>
-                        {t.type}
-                      </span>
-                    </td>
-                    <td className="py-3 px-3 text-slate-200">{t.pricePln.toFixed(2)} zł</td>
-                    <td className="py-3 px-3 text-slate-300">{t.shares} szt.</td>
-                    <td className="py-3 px-3 text-slate-200">{t.totalPln.toLocaleString('pl-PL')} zł</td>
-                    <td className="py-3 px-3">
-                      {t.resultPln !== 0 ? (
-                        <span className={`font-bold ${t.resultPln > 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                          {t.resultPln > 0 ? '+' : ''}{t.resultPln.toFixed(2)} zł ({t.resultPercent > 0 ? '+' : ''}{t.resultPercent.toFixed(1)}%)
+              {filteredAndSortedTrades.length === 0 ? (
+                <tr>
+                  <td colSpan={9} className="py-8 text-center text-slate-500 text-xs font-sans">
+                    Brak zarejestrowanych transakcji spełniających wybrane kryteria w tym portfelu.
+                  </td>
+                </tr>
+              ) : (
+                filteredAndSortedTrades.slice(tradePage * ITEMS_PER_PAGE, (tradePage + 1) * ITEMS_PER_PAGE).map(t => {
+                  return (
+                    <tr key={t.id} className="hover:bg-slate-800/40 transition-colors">
+                      {/* Sticky Column 1: Data i Godzina */}
+                      <td className="py-3 sticky left-0 z-10 bg-slate-900 px-3 text-slate-400 font-mono shadow-[2px_0_5px_rgba(0,0,0,0.3)]">
+                        {t.date}
+                      </td>
+                      <td className="py-3 px-3 font-sans">
+                        <span className="font-bold text-white block">{t.ticker}</span>
+                        <span className="text-[11px] text-slate-400 block truncate max-w-[120px]">{t.name}</span>
+                      </td>
+                      <td className="py-3 px-3 font-sans">
+                        <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                          t.type === 'KUPNO' ? 'bg-emerald-950 text-emerald-400' : 'bg-rose-950 text-rose-400'
+                        }`}>
+                          {t.type}
                         </span>
-                      ) : (
-                        <span className="text-slate-500">—</span>
-                      )}
-                    </td>
-                    <td className="py-3 px-3 font-sans">
-                      <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-800 text-slate-300 border border-slate-700">
-                        {t.status}
-                      </span>
-                    </td>
-                    <td className="py-3 px-3 font-sans text-slate-300 text-[11px] whitespace-normal break-words min-w-[220px] max-w-md leading-snug" title={t.reason}>
-                      {t.reason}
-                    </td>
-                  </tr>
-                );
-              })}
+                      </td>
+                      <td className="py-3 px-3 text-slate-200">{t.pricePln.toFixed(2)} zł</td>
+                      <td className="py-3 px-3 text-slate-300">{t.shares} szt.</td>
+                      <td className="py-3 px-3 text-slate-200">{t.totalPln.toLocaleString('pl-PL')} zł</td>
+                      <td className="py-3 px-3">
+                        {t.resultPln !== 0 ? (
+                          <span className={`font-bold ${t.resultPln > 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                            {t.resultPln > 0 ? '+' : ''}{t.resultPln.toFixed(2)} zł ({t.resultPercent > 0 ? '+' : ''}{t.resultPercent.toFixed(1)}%)
+                          </span>
+                        ) : (
+                          <span className="text-slate-500">—</span>
+                        )}
+                      </td>
+                      <td className="py-3 px-3 font-sans">
+                        <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-800 text-slate-300 border border-slate-700">
+                          {t.status}
+                        </span>
+                      </td>
+                      <td className="py-3 px-3 font-sans text-slate-300 text-[11px] whitespace-normal break-words min-w-[220px] max-w-md leading-snug" title={t.reason}>
+                        {t.reason}
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
             </tbody>
           </table>
           <div className="flex items-center justify-center gap-2 pt-4">
             <button onClick={() => setTradePage(Math.max(0, tradePage - 1))} disabled={tradePage === 0} className="px-3 py-1 bg-slate-800 rounded-lg text-xs disabled:opacity-50">Poprzednia</button>
-            <span className="text-xs text-slate-400">Strona {tradePage + 1}</span>
+            <span className="text-xs text-slate-400">Strona {tradePage + 1} z {Math.max(1, Math.ceil(filteredAndSortedTrades.length / ITEMS_PER_PAGE))}</span>
             <button onClick={() => setTradePage(tradePage + 1)} disabled={(tradePage + 1) * ITEMS_PER_PAGE >= filteredAndSortedTrades.length} className="px-3 py-1 bg-slate-800 rounded-lg text-xs disabled:opacity-50">Następna</button>
           </div>
         </div>

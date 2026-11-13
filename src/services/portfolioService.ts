@@ -518,17 +518,24 @@ export class PortfolioService {
 
     const closePrice = pos.currentPrice;
     const isShort = pos.positionSide === 'SHORT';
-    const totalReturnPln = Number((pos.shares * closePrice).toFixed(2));
     const pnlPln = isShort
       ? Number(((pos.entryPrice - closePrice) * pos.shares).toFixed(2))
       : Number(((closePrice - pos.entryPrice) * pos.shares).toFixed(2));
+    const totalReturnPln = isShort
+      ? Number(Math.max(0, pos.entryPrice * pos.shares + pnlPln).toFixed(2))
+      : Number((pos.shares * closePrice).toFixed(2));
     const pnlPercent = isShort
       ? Number((((pos.entryPrice - closePrice) / pos.entryPrice) * 100).toFixed(2))
       : Number((((closePrice - pos.entryPrice) / pos.entryPrice) * 100).toFixed(2));
 
     // Usuń pozycję z aktywnych i przelicz dokładną alokację & saldo
     portfolio.activePositions.splice(posIndex, 1);
-    const openVal = portfolio.activePositions.reduce((s, item) => s + item.shares * item.currentPrice, 0);
+    const openVal = portfolio.activePositions.reduce((s, item) => {
+      if (item.positionSide === 'SHORT') {
+        return s + Math.max(0, item.entryPrice * item.shares + (item.entryPrice - item.currentPrice) * item.shares);
+      }
+      return s + item.shares * item.currentPrice;
+    }, 0);
     portfolio.cashPln = Number((portfolio.cashPln + totalReturnPln).toFixed(2));
     portfolio.allocatedPln = Number(openVal.toFixed(2));
     portfolio.currentBalance = Number((portfolio.cashPln + portfolio.allocatedPln).toFixed(2));
@@ -800,13 +807,17 @@ export class PortfolioService {
           }
 
           const timestamp = formatWarsawDateTime();
+          const hitTp1 = !pos.tp1Reached && pos.currentPrice >= pos.targetPrice1;
+          const hitTp2 = pos.tp1Reached && !pos.tp2Reached && pos.currentPrice >= pos.targetPrice2;
+          const isTp3 = pos.tp2Reached && !pos.tp3Reached && pos.currentPrice >= pos.targetPrice3;
+          const isSl = pos.currentPrice <= pos.stopLoss;
 
           // 1. Osiągnięcie TP1 (33% wolumenu) -> Realizacja częściowa 33% i przesunięcie SL na Break-Even
-          if (!pos.tp1Reached && pos.currentPrice >= pos.targetPrice1 && pos.shares > 0) {
+          if (hitTp1 && pos.shares > 0) {
             pos.tp1Reached = true;
             pos.status = 'ZREALIZOWANO TP1';
             pos.stopLoss = Math.max(pos.stopLoss, pos.entryPrice); // Break-even SL
-            
+
             const soldShares = Math.min(pos.shares, Math.max(1, Math.floor(pos.shares * 0.33)));
             pos.shares = Math.max(0, pos.shares - soldShares);
             const returnCash = Number((soldShares * pos.currentPrice).toFixed(2));
@@ -856,10 +867,8 @@ export class PortfolioService {
               });
             }
             if (pos.shares <= 0) return;
-          }
-
-          // 2. Osiągnięcie TP2 (kolejne 33% wolumenu)
-          if (pos.tp1Reached && !pos.tp2Reached && pos.currentPrice >= pos.targetPrice2 && pos.shares > 0) {
+          } else if (hitTp2 && pos.shares > 0) {
+            // 2. Osiągnięcie TP2 (kolejne 33% wolumenu)
             pos.tp2Reached = true;
             pos.status = 'ZREALIZOWANO TP2';
 
@@ -911,13 +920,8 @@ export class PortfolioService {
               });
             }
             if (pos.shares <= 0) return;
-          }
-
-          // 3. Osiągnięcie TP3 (+11.8%) lub STOP LOSS -> Pełne zamknięcie pozostałej pozycji
-          const isTp3 = pos.tp2Reached && !pos.tp3Reached && pos.currentPrice >= pos.targetPrice3;
-          const isSl = pos.currentPrice <= pos.stopLoss;
-
-          if ((isTp3 || isSl) && pos.shares > 0) {
+          } else if ((isTp3 || isSl) && pos.shares > 0) {
+            // 3. Osiągnięcie TP3 (+11.8%) lub STOP LOSS -> Pełne zamknięcie pozostałej pozycji
             changed = true;
             const remainingShares = pos.shares;
             const returnCash = Number((remainingShares * pos.currentPrice).toFixed(2));

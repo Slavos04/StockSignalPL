@@ -341,6 +341,8 @@ async function startServer() {
 
       const rawBars: any[] = [];
       const eurRate = 4.28; // Standard conversion for EUR-listed assets if needed
+      const rawCurrency = String(chartData.meta?.currency || '').trim();
+      const subUnitDivisor = (rawCurrency === 'USX' || rawCurrency === 'USc' || rawCurrency === 'USC' || rawCurrency === 'GBp' || rawCurrency === 'GBX') ? 100 : 1;
 
       for (let i = 0; i < timestamps.length; i++) {
         let c = closes[i];
@@ -353,6 +355,13 @@ async function startServer() {
           if (o == null || isNaN(o)) o = c;
           if (h == null || isNaN(h)) h = Math.max(o, c);
           if (l == null || isNaN(l)) l = Math.min(o, c);
+
+          if (subUnitDivisor !== 1) {
+            o = o / subUnitDivisor;
+            h = h / subUnitDivisor;
+            l = l / subUnitDivisor;
+            c = c / subUnitDivisor;
+          }
 
           // Convert to PLN if asset is commodity priced in USD or EUR
           if (isCommodity) {
@@ -473,6 +482,15 @@ async function startServer() {
               const volume = meta.regularMarketVolume ?? q?.volume?.[lastIdx] ?? 0;
 
               if (price == null || isNaN(price)) return null;
+
+              const rawCurrency = String(meta.currency || '').trim();
+              const subUnitDivisor = (rawCurrency === 'USX' || rawCurrency === 'USc' || rawCurrency === 'USC' || rawCurrency === 'GBp' || rawCurrency === 'GBX') ? 100 : 1;
+              if (subUnitDivisor !== 1) {
+                price = price / subUnitDivisor;
+                if (prevClose) prevClose = prevClose / subUnitDivisor;
+                if (high) high = high / subUnitDivisor;
+                if (low) low = low / subUnitDivisor;
+              }
 
               const priceUsd = isCommodity ? Number(price.toFixed(2)) : undefined;
 

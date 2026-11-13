@@ -223,6 +223,18 @@ export class ServerAutoPilotDaemon {
             ? (!pos.tp1Reached && pos.currentPrice <= pos.targetPrice1)
             : (!pos.tp1Reached && pos.currentPrice >= pos.targetPrice1);
 
+          const hitTp2 = isShort
+            ? (pos.tp1Reached && !pos.tp2Reached && pos.currentPrice <= pos.targetPrice2)
+            : (pos.tp1Reached && !pos.tp2Reached && pos.currentPrice >= pos.targetPrice2);
+
+          const hitTp3 = isShort
+            ? (pos.tp2Reached && !pos.tp3Reached && pos.currentPrice <= pos.targetPrice3)
+            : (pos.tp2Reached && !pos.tp3Reached && pos.currentPrice >= pos.targetPrice3);
+
+          const hitSl = isShort
+            ? (pos.currentPrice >= pos.stopLoss)
+            : (pos.currentPrice <= pos.stopLoss);
+
           if (hitTp1 && pos.shares > 0) {
             pos.tp1Reached = true;
             pos.status = 'ZREALIZOWANO TP1';
@@ -294,14 +306,8 @@ export class ServerAutoPilotDaemon {
             if (pos.shares <= 0) {
               continue;
             }
-          }
-
-          // 2. Osiągnięcie TP2 (kolejne 33% pozostałego wolumenu lub ~33% początkowej pozycji)
-          const hitTp2 = isShort
-            ? (pos.tp1Reached && !pos.tp2Reached && pos.currentPrice <= pos.targetPrice2)
-            : (pos.tp1Reached && !pos.tp2Reached && pos.currentPrice >= pos.targetPrice2);
-
-          if (hitTp2 && pos.shares > 0) {
+          } else if (hitTp2 && pos.shares > 0) {
+            // 2. Osiągnięcie TP2 (kolejne ~33% początkowej pozycji / 50% pozostałego pakietu)
             pos.tp2Reached = true;
             pos.status = 'ZREALIZOWANO TP2';
 
@@ -368,18 +374,8 @@ export class ServerAutoPilotDaemon {
             if (pos.shares <= 0) {
               continue;
             }
-          }
-
-          // 3. Osiągnięcie TP3 lub STOP LOSS -> Pełne zamknięcie pozostałej pozycji
-          const hitTp3 = isShort
-            ? (pos.tp2Reached && !pos.tp3Reached && pos.currentPrice <= pos.targetPrice3)
-            : (pos.tp2Reached && !pos.tp3Reached && pos.currentPrice >= pos.targetPrice3);
-
-          const hitSl = isShort
-            ? (pos.currentPrice >= pos.stopLoss)
-            : (pos.currentPrice <= pos.stopLoss);
-
-          if ((hitTp3 || hitSl) && pos.shares > 0) {
+          } else if ((hitTp3 || hitSl) && pos.shares > 0) {
+            // 3. Osiągnięcie TP3 lub STOP LOSS -> Pełne zamknięcie pozostałej pozycji
             const remainingShares = pos.shares;
             const returnCash = Number((remainingShares * pos.currentPrice).toFixed(2));
             const pnlPart = calcPnlPln(remainingShares);
