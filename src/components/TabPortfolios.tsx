@@ -14,6 +14,7 @@ import {
 } from 'recharts';
 import { PortfolioStrategy, TradeRecord, StockQuote, PositionItem, HistoricalBar } from '../types/stock';
 import { PortfolioService } from '../services/portfolioService';
+import { parsePolishDateTimeToMs } from '../utils/dateTime';
 import { CreatePortfolioModal } from './CreatePortfolioModal';
 import { EditPortfolioModal } from './EditPortfolioModal';
 import { SmartRebalanceModal } from './SmartRebalanceModal';
@@ -1242,10 +1243,20 @@ export const TabPortfolios: React.FC<TabPortfoliosProps> = ({
         return t.status === tradeFilter;
       })
       .sort((a, b) => {
+        if (tradeSortField === 'date') {
+          const tsA = parsePolishDateTimeToMs(a.date);
+          const tsB = parsePolishDateTimeToMs(b.date);
+          if (tsA !== tsB) {
+            return tradeSortOrder === 'asc' ? tsA - tsB : tsB - tsA;
+          }
+          return tradeSortOrder === 'asc'
+            ? (a.id || '').localeCompare(b.id || '')
+            : (b.id || '').localeCompare(a.id || '');
+        }
         const valA = a[tradeSortField];
         const valB = b[tradeSortField];
-        if (tradeSortOrder === 'asc') return valA > valB ? 1 : -1;
-        return valA < valB ? 1 : -1;
+        if (tradeSortOrder === 'asc') return valA > valB ? 1 : valA < valB ? -1 : 0;
+        return valA < valB ? 1 : valA > valB ? -1 : 0;
       });
   }, [trades, tradeFilter, tradeSortField, tradeSortOrder, isAllPortfoliosSelected, currentPortfolio]);
 

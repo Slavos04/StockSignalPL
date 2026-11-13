@@ -35,7 +35,7 @@ export const AutoPilotLogsModal: React.FC<AutoPilotLogsModalProps> = ({ portfoli
           </div>
           <div>
             <h3 className="text-base font-bold text-white">Dziennik Audytowy Auto-Pilota</h3>
-            <p className="text-xs text-slate-400">Rejestr decyzji bota weryfikujący warunki wejścia, brak gotówki, spadek konsensusu i limity</p>
+            <p className="text-xs text-slate-400">Rejestr decyzji bota z dokładną datą i godziną transakcji (czas warszawski CET/CEST)</p>
           </div>
         </div>
 
@@ -45,7 +45,7 @@ export const AutoPilotLogsModal: React.FC<AutoPilotLogsModalProps> = ({ portfoli
             <Filter className="w-3.5 h-3.5 text-slate-400" />
             <span>Filtruj Akcje Bota:</span>
           </span>
-          <div className="flex gap-1.5">
+          <div className="flex gap-1.5 flex-wrap">
             {['ALL', 'KUPNO_LONG', 'KUPNO_SHORT', 'AUTO_CUT', 'POMINIĘTO'].map(act => (
               <button
                 key={act}
@@ -73,7 +73,6 @@ export const AutoPilotLogsModal: React.FC<AutoPilotLogsModalProps> = ({ portfoli
             filteredLogs.map(log => {
               const isBuy = log.action === 'KUPNO_LONG' || log.action === 'KUPNO_SHORT';
               const isCut = log.action === 'AUTO_CUT';
-              const isSkipped = log.action === 'POMINIĘTO';
 
               return (
                 <div
@@ -86,9 +85,11 @@ export const AutoPilotLogsModal: React.FC<AutoPilotLogsModalProps> = ({ portfoli
                       : 'bg-slate-950/80 border-slate-800 text-slate-300'
                   }`}
                 >
-                  <div className="flex items-center justify-between font-mono text-[11px]">
-                    <div className="flex items-center gap-2">
-                      <span className="text-slate-400">{log.timestamp}</span>
+                  <div className="flex items-center justify-between font-mono text-[11px] flex-wrap gap-1">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="px-1.5 py-0.5 rounded bg-slate-900/90 border border-slate-700/80 text-slate-300">
+                        📅 {log.timestamp}
+                      </span>
                       <span className="font-bold text-white text-xs">{log.ticker}</span>
                       <span
                         className={`px-2 py-0.5 rounded text-[10px] font-bold ${

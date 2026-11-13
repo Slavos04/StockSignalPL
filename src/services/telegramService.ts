@@ -1,4 +1,5 @@
 import { TelegramSettings, StockConsensus, StockQuote } from '../types/stock';
+import { formatWarsawDateTime, formatWarsawTime } from '../utils/dateTime';
 
 const TELEGRAM_STORAGE_KEY = 'stocksignalpl_telegram_v1';
 
@@ -65,7 +66,7 @@ export class TelegramService {
 
       const data = await res.json();
       if (res.ok && data.ok) {
-        this.saveSettings({ lastSentAt: new Date().toLocaleTimeString('pl-PL') });
+        this.saveSettings({ lastSentAt: formatWarsawTime() });
         return { success: true, message: 'Alert został pomyślnie wysłany na Twój kanał Telegram!' };
       } else {
         return { success: false, message: `Błąd Telegram API: ${data.description || data.error || 'Nieznany błąd'}` };
@@ -101,7 +102,7 @@ export class TelegramService {
       `✅ Połączenie z botem zostało pomyślnie nawiązane!\n` +
       `🏛️ Silnik giełdowy GPW Warszawa jest aktywny.\n` +
       `📡 Nasłuch 10 źródeł sygnałów i Auto-Pilot (>=76%) działają poprawnie.\n` +
-      `⏰ Czas testu: <code>${new Date().toLocaleString('pl-PL')}</code>`;
+      `⏰ Czas testu (Warszawa): <code>${formatWarsawDateTime()}</code>`;
 
     return this.sendAlert(testMessage);
   }

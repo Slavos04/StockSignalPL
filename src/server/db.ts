@@ -1,29 +1,133 @@
 import pg from 'pg';
+import fs from 'fs';
+import path from 'path';
 import { INITIAL_PORTFOLIOS, INITIAL_TRADES, INITIAL_USERS } from '../data/initialData';
+import { formatWarsawDateTime } from '../utils/dateTime';
+import type { AutoPilotNotification } from '../types/stock';
 
 const { Pool } = pg;
 
 const connectionString = process.env.DATABASE_URL || 'postgres://stockuser:stockpassword123!@localhost:5432/stocksignalpl';
+const RUNTIME_STATE_FILE = path.resolve(process.cwd(), '.runtime-state.json');
 
 export let pool: pg.Pool | null = null;
 export let isPostgresConnected = false;
 
-// Fallback in-memory stores if Postgres is not running (e.g. dev preview without local Postgres daemon)
+export interface DaemonConfig {
+  intervalMs: number;
+  forceSessionOpenTest: boolean;
+}
+
+// Fallback in-memory stores with JSON disk persistence when PostgreSQL is unavailable
 const memoryUsers = new Map<string, any>();
 const memoryPortfolios = new Map<string, any[]>();
 const memoryTrades = new Map<string, any[]>();
 const memorySettings = new Map<string, any>();
+const memoryNotifications = new Map<string, AutoPilotNotification[]>();
+let memoryDaemonConfig: DaemonConfig = {
+  intervalMs: 15000,
+  forceSessionOpenTest: false
+};
 
-// Initialize default users and their portfolios in memory
-INITIAL_USERS.forEach(u => {
-  memoryUsers.set(u.id, {
-    ...u,
-    password_hash: u.username === 'admin' ? 'Admin123!' : 'gpw2026!'
+function deduplicateById<T extends { id?: string }>(items: T[]): T[] {
+  const seen = new Set<string>();
+  const result: T[] = [];
+  for (const item of items) {
+    if (!item?.id) continue;
+    if (!seen.has(item.id)) {
+      seen.add(item.id);
+      result.push(item);
+    }
+  }
+  return result;
+}
+
+function seedDefaultMemoryState(): void {
+  INITIAL_USERS.forEach(u => {
+    memoryUsers.set(u.id, {
+      ...u,
+      password_hash: u.username === 'admin' ? 'Admin123!' : 'gpw2026!'
+    });
+    memoryPortfolios.set(u.id, JSON.parse(JSON.stringify(INITIAL_PORTFOLIOS)));
+    memoryTrades.set(u.id, JSON.parse(JSON.stringify(INITIAL_TRADES)));
+    memoryNotifications.set(u.id, []);
   });
-  // Pre-seed default portfolios & trades so server daemon has data immediately on boot
-  memoryPortfolios.set(u.id, JSON.parse(JSON.stringify(INITIAL_PORTFOLIOS)));
-  memoryTrades.set(u.id, JSON.parse(JSON.stringify(INITIAL_TRADES)));
-});
+}
+
+let persistTimer: NodeJS.Timeout | null = null;
+function schedulePersistRuntimeState(): void {
+  if (persistTimer) return;
+  persistTimer = setTimeout(() => {
+    persistTimer = null;
+    try {
+      const payload = {
+        users: Object.fromEntries(memoryUsers.entries()),
+        portfolios: Object.fromEntries(memoryPortfolios.entries()),
+        trades: Object.fromEntries(memoryTrades.entries()),
+        settings: Object.fromEntries(memorySettings.entries()),
+        notifications: Object.fromEntries(memoryNotifications.entries()),
+        daemonConfig: memoryDaemonConfig
+      };
+      const tmpFile = `${RUNTIME_STATE_FILE}.tmp`;
+      fs.writeFileSync(tmpFile, JSON.stringify(payload, null, 2), 'utf8');
+      fs.renameSync(tmpFile, RUNTIME_STATE_FILE);
+    } catch (e: any) {
+      console.warn('[RuntimeState] Błąd zapisu stanu serwera:', e?.message || e);
+    }
+  }, 150);
+}
+
+function loadRuntimeStateFromDisk(): void {
+  seedDefaultMemoryState();
+  try {
+    if (!fs.existsSync(RUNTIME_STATE_FILE)) return;
+    const raw = fs.readFileSync(RUNTIME_STATE_FILE, 'utf8');
+    const parsed = JSON.parse(raw);
+
+    if (parsed.users && typeof parsed.users === 'object') {
+      for (const [k, v] of Object.entries(parsed.users)) {
+        memoryUsers.set(k, v);
+      }
+    }
+    if (parsed.portfolios && typeof parsed.portfolios === 'object') {
+      for (const [k, v] of Object.entries(parsed.portfolios)) {
+        if (Array.isArray(v) && v.length > 0) {
+          memoryPortfolios.set(k, v);
+        }
+      }
+    }
+    if (parsed.trades && typeof parsed.trades === 'object') {
+      for (const [k, v] of Object.entries(parsed.trades)) {
+        if (Array.isArray(v)) {
+          memoryTrades.set(k, deduplicateById(v).slice(0, 200));
+        }
+      }
+    }
+    if (parsed.settings && typeof parsed.settings === 'object') {
+      for (const [k, v] of Object.entries(parsed.settings)) {
+        memorySettings.set(k, v);
+      }
+    }
+    if (parsed.notifications && typeof parsed.notifications === 'object') {
+      for (const [k, v] of Object.entries(parsed.notifications)) {
+        if (Array.isArray(v)) {
+          memoryNotifications.set(k, deduplicateById(v as AutoPilotNotification[]).slice(0, 100));
+        }
+      }
+    }
+    if (parsed.daemonConfig && typeof parsed.daemonConfig === 'object') {
+      memoryDaemonConfig = {
+        intervalMs: Number(parsed.daemonConfig.intervalMs) || 15000,
+        forceSessionOpenTest: Boolean(parsed.daemonConfig.forceSessionOpenTest)
+      };
+    }
+    console.log('[RuntimeState] Przywrócono stan portfeli, transakcji, powiadomień i konfiguracji demona z dysku.');
+  } catch (e: any) {
+    console.warn('[RuntimeState] Nie udało się odczytać zapisanego stanu, używam domyślnego:', e?.message || e);
+  }
+}
+
+loadRuntimeStateFromDisk();
 
 export async function initPostgres(): Promise<void> {
   try {
@@ -34,12 +138,10 @@ export async function initPostgres(): Promise<void> {
       max: 15
     });
 
-    // Test connection
     const client = await pool.connect();
     isPostgresConnected = true;
     console.log('[PostgreSQL] Pomyślnie połączono z bazą PostgreSQL na serwerze.');
 
-    // Create tables if not exist
     await client.query(`
       CREATE TABLE IF NOT EXISTS users (
         id VARCHAR(128) PRIMARY KEY,
@@ -74,9 +176,12 @@ export async function initPostgres(): Promise<void> {
         is_custom BOOLEAN DEFAULT false,
         active_positions JSONB DEFAULT '[]'::jsonb,
         history_data JSONB DEFAULT '[]'::jsonb,
+        strategy_meta JSONB DEFAULT '{}'::jsonb,
         updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
         PRIMARY KEY (id, user_id)
       );
+
+      ALTER TABLE portfolios ADD COLUMN IF NOT EXISTS strategy_meta JSONB DEFAULT '{}'::jsonb;
 
       CREATE TABLE IF NOT EXISTS trades (
         id VARCHAR(128) NOT NULL,
@@ -110,12 +215,26 @@ export async function initPostgres(): Promise<void> {
         updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
       );
 
-      -- Default Admin account
+      CREATE TABLE IF NOT EXISTS notifications (
+        id VARCHAR(128) NOT NULL,
+        user_id VARCHAR(128) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        payload JSONB NOT NULL,
+        is_read BOOLEAN DEFAULT false,
+        created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (id, user_id)
+      );
+
+      CREATE TABLE IF NOT EXISTS daemon_config (
+        id VARCHAR(32) PRIMARY KEY,
+        interval_ms INT DEFAULT 15000,
+        force_session_open_test BOOLEAN DEFAULT false,
+        updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+      );
+
       INSERT INTO users (id, username, email, full_name, password_hash, role, status, last_login)
       VALUES ('usr_admin', 'admin', 'slavosmm@gmail.com', 'Główny Administrator GPW', 'Admin123!', 'admin', 'active', '04.11.2026, 10:00')
       ON CONFLICT (username) DO NOTHING;
 
-      -- Default Trader account
       INSERT INTO users (id, username, email, full_name, password_hash, role, status, last_login)
       VALUES ('usr_trader', 'trader_gpw', 'trader@gpw.pl', 'Inwestor Indywidualny GPW', 'gpw2026!', 'trader', 'active', '04.11.2026, 10:00')
       ON CONFLICT (username) DO NOTHING;
@@ -124,7 +243,7 @@ export async function initPostgres(): Promise<void> {
     client.release();
   } catch (err: any) {
     isPostgresConnected = false;
-    console.warn(`[PostgreSQL] Baza danych Postgres na serwerze nie jest jeszcze aktywna (${err.message}). Używam wbudowanego bufora pamięci serwera.`);
+    console.warn(`[PostgreSQL] Baza danych Postgres na serwerze nie jest jeszcze aktywna (${err.message}). Używam trwałego bufora serwera.`);
   }
 }
 
@@ -144,7 +263,6 @@ export async function dbGetUserByLogin(usernameOrEmail: string): Promise<any | n
     }
   }
 
-  // Memory fallback
   for (const user of memoryUsers.values()) {
     if (user.username.toLowerCase() === clean || user.email.toLowerCase() === clean) {
       return user;
@@ -154,13 +272,14 @@ export async function dbGetUserByLogin(usernameOrEmail: string): Promise<any | n
 }
 
 export async function dbCreateUser(user: { id: string; username: string; email: string; fullName: string; passwordHash: string; role: string }): Promise<any> {
+  const nowStr = formatWarsawDateTime();
   if (isPostgresConnected && pool) {
     try {
       const res = await pool.query(
         `INSERT INTO users (id, username, email, full_name, password_hash, role, status, last_login)
          VALUES ($1, $2, $3, $4, $5, $6, 'active', $7)
          RETURNING *`,
-        [user.id, user.username, user.email, user.fullName, user.passwordHash, user.role, new Date().toLocaleString('pl-PL')]
+        [user.id, user.username, user.email, user.fullName, user.passwordHash, user.role, nowStr]
       );
       return res.rows[0];
     } catch (e) {
@@ -173,10 +292,38 @@ export async function dbCreateUser(user: { id: string; username: string; email: 
     full_name: user.fullName,
     password_hash: user.passwordHash,
     status: 'active',
-    last_login: new Date().toLocaleString('pl-PL')
+    last_login: nowStr
   };
   memoryUsers.set(user.id, memoryObj);
+  schedulePersistRuntimeState();
   return memoryObj;
+}
+
+function mapPgPortfolioRow(r: any): any {
+  const meta = (r.strategy_meta && typeof r.strategy_meta === 'object') ? r.strategy_meta : {};
+  return {
+    ...meta,
+    id: r.id,
+    userId: r.user_id,
+    name: r.name,
+    shortDesc: r.short_desc,
+    riskLevel: r.risk_level,
+    initialCapital: Number(r.initial_capital),
+    currentBalance: Number(r.current_balance),
+    allocatedPln: Number(r.allocated_pln),
+    cashPln: Number(r.cash_pln),
+    totalProfitPln: Number(r.total_profit_pln),
+    totalProfitPercent: Number(r.total_profit_percent),
+    benchmarkReturnWig20: Number(r.benchmark_return_wig20),
+    alpha: Number(r.alpha),
+    tradesCount: r.trades_count,
+    winRate: Number(r.win_rate),
+    autoPilotEnabled: r.autopilot_enabled,
+    telegramEnabled: r.telegram_enabled,
+    isCustom: r.is_custom,
+    activePositions: r.active_positions || [],
+    historyData: r.history_data || []
+  };
 }
 
 // Portfolios methods
@@ -188,31 +335,9 @@ export async function dbGetPortfolios(userId: string): Promise<any[]> {
         [userId]
       );
       if (res.rows.length > 0) {
-        return res.rows.map(r => ({
-          id: r.id,
-          userId: r.user_id,
-          name: r.name,
-          shortDesc: r.short_desc,
-          riskLevel: r.risk_level,
-          initialCapital: Number(r.initial_capital),
-          currentBalance: Number(r.current_balance),
-          allocatedPln: Number(r.allocated_pln),
-          cashPln: Number(r.cash_pln),
-          totalProfitPln: Number(r.total_profit_pln),
-          totalProfitPercent: Number(r.total_profit_percent),
-          benchmarkReturnWig20: Number(r.benchmark_return_wig20),
-          alpha: Number(r.alpha),
-          tradesCount: r.trades_count,
-          winRate: Number(r.win_rate),
-          autoPilotEnabled: r.autopilot_enabled,
-          telegramEnabled: r.telegram_enabled,
-          isCustom: r.is_custom,
-          activePositions: r.active_positions || [],
-          historyData: r.history_data || []
-        }));
+        return res.rows.map(mapPgPortfolioRow);
       }
 
-      // If user has no portfolios yet, seed defaults in PostgreSQL
       for (const p of INITIAL_PORTFOLIOS) {
         await dbSavePortfolio(userId, p);
       }
@@ -222,25 +347,50 @@ export async function dbGetPortfolios(userId: string): Promise<any[]> {
     }
   }
 
-  // Memory fallback
   const list = memoryPortfolios.get(userId);
   if (list && list.length > 0) return list;
-  const initial = [...INITIAL_PORTFOLIOS];
+  const initial = JSON.parse(JSON.stringify(INITIAL_PORTFOLIOS));
   memoryPortfolios.set(userId, initial);
+  schedulePersistRuntimeState();
   return initial;
 }
 
 export async function dbSavePortfolio(userId: string, p: any): Promise<void> {
   if (isPostgresConnected && pool) {
     try {
+      const strategyMeta = {
+        allowedMarkets: p.allowedMarkets,
+        allowedMarket: p.allowedMarket,
+        createdAt: p.createdAt,
+        orderExecutionType: p.orderExecutionType,
+        positionSizingModel: p.positionSizingModel,
+        stopLossTrailingMode: p.stopLossTrailingMode,
+        categoryAllocationLimit: p.categoryAllocationLimit,
+        allowPyramiding: p.allowPyramiding,
+        multiTpBreakEvenEnabled: p.multiTpBreakEvenEnabled,
+        anchorLeaderTracking: p.anchorLeaderTracking,
+        anchorLeaderTicker: p.anchorLeaderTicker,
+        anchorLeaderTrendMode: p.anchorLeaderTrendMode,
+        anchorLeaderCorrelation: p.anchorLeaderCorrelation,
+        anchorLeaderLagMinutes: p.anchorLeaderLagMinutes,
+        autoPilotMinConfidence: p.autoPilotMinConfidence,
+        autoPilotMinRiskReward: p.autoPilotMinRiskReward,
+        autoPilotMaxPositions: p.autoPilotMaxPositions,
+        autoPilotAllocationPercent: p.autoPilotAllocationPercent,
+        drawdownLockCap: p.drawdownLockCap,
+        drawdownLockActive: p.drawdownLockActive,
+        autoCutWeakConsensus: p.autoCutWeakConsensus,
+        autoPilotLogs: (p.autoPilotLogs || []).slice(0, 100)
+      };
+
       await pool.query(
         `INSERT INTO portfolios (
           id, user_id, name, short_desc, risk_level, initial_capital, current_balance,
           allocated_pln, cash_pln, total_profit_pln, total_profit_percent, benchmark_return_wig20,
           alpha, trades_count, win_rate, autopilot_enabled, telegram_enabled, is_custom,
-          active_positions, history_data, updated_at
+          active_positions, history_data, strategy_meta, updated_at
         ) VALUES (
-          $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, CURRENT_TIMESTAMP
+          $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, CURRENT_TIMESTAMP
         )
         ON CONFLICT (id, user_id) DO UPDATE SET
           name = EXCLUDED.name,
@@ -261,6 +411,7 @@ export async function dbSavePortfolio(userId: string, p: any): Promise<void> {
           is_custom = EXCLUDED.is_custom,
           active_positions = EXCLUDED.active_positions,
           history_data = EXCLUDED.history_data,
+          strategy_meta = EXCLUDED.strategy_meta,
           updated_at = CURRENT_TIMESTAMP`,
         [
           p.id,
@@ -282,7 +433,8 @@ export async function dbSavePortfolio(userId: string, p: any): Promise<void> {
           Boolean(p.telegramEnabled),
           Boolean(p.isCustom),
           JSON.stringify(p.activePositions || []),
-          JSON.stringify(p.historyData || [])
+          JSON.stringify(p.historyData || []),
+          JSON.stringify(strategyMeta)
         ]
       );
       return;
@@ -291,7 +443,6 @@ export async function dbSavePortfolio(userId: string, p: any): Promise<void> {
     }
   }
 
-  // Memory fallback
   const list = memoryPortfolios.get(userId) || [];
   const idx = list.findIndex(x => x.id === p.id);
   if (idx >= 0) {
@@ -300,6 +451,7 @@ export async function dbSavePortfolio(userId: string, p: any): Promise<void> {
     list.push({ ...p });
   }
   memoryPortfolios.set(userId, list);
+  schedulePersistRuntimeState();
 }
 
 export async function dbDeletePortfolio(userId: string, portfolioId: string): Promise<void> {
@@ -314,6 +466,7 @@ export async function dbDeletePortfolio(userId: string, portfolioId: string): Pr
 
   const list = memoryPortfolios.get(userId) || [];
   memoryPortfolios.set(userId, list.filter(x => x.id !== portfolioId));
+  schedulePersistRuntimeState();
 }
 
 // Trades methods
@@ -352,13 +505,16 @@ export async function dbGetTrades(userId: string): Promise<any[]> {
   }
 
   const list = memoryTrades.get(userId);
-  if (list && list.length > 0) return list;
-  const initial = [...INITIAL_TRADES];
+  if (list && list.length > 0) return deduplicateById(list);
+  const initial = JSON.parse(JSON.stringify(INITIAL_TRADES));
   memoryTrades.set(userId, initial);
+  schedulePersistRuntimeState();
   return initial;
 }
 
 export async function dbSaveTrade(userId: string, t: any): Promise<void> {
+  if (!t || !t.id) return;
+
   if (isPostgresConnected && pool) {
     try {
       await pool.query(
@@ -372,7 +528,7 @@ export async function dbSaveTrade(userId: string, t: any): Promise<void> {
           t.id,
           userId,
           t.strategyId || 'p1',
-          t.date || new Date().toLocaleString('pl-PL'),
+          t.date || formatWarsawDateTime(),
           t.ticker,
           t.name,
           t.type,
@@ -392,8 +548,12 @@ export async function dbSaveTrade(userId: string, t: any): Promise<void> {
   }
 
   const list = memoryTrades.get(userId) || [];
+  if (list.some(x => x.id === t.id)) {
+    return;
+  }
   list.unshift({ ...t });
   memoryTrades.set(userId, list.slice(0, 200));
+  schedulePersistRuntimeState();
 }
 
 export async function dbGetAllPortfoliosWithUsers(): Promise<{ userId: string; portfolio: any }[]> {
@@ -405,28 +565,7 @@ export async function dbGetAllPortfoliosWithUsers(): Promise<{ userId: string; p
       res.rows.forEach(r => {
         result.push({
           userId: r.user_id,
-          portfolio: {
-            id: r.id,
-            userId: r.user_id,
-            name: r.name,
-            shortDesc: r.short_desc,
-            riskLevel: r.risk_level,
-            initialCapital: Number(r.initial_capital),
-            currentBalance: Number(r.current_balance),
-            allocatedPln: Number(r.allocated_pln),
-            cashPln: Number(r.cash_pln),
-            totalProfitPln: Number(r.total_profit_pln),
-            totalProfitPercent: Number(r.total_profit_percent),
-            benchmarkReturnWig20: Number(r.benchmark_return_wig20),
-            alpha: Number(r.alpha),
-            tradesCount: r.trades_count,
-            winRate: Number(r.win_rate),
-            autoPilotEnabled: r.autopilot_enabled,
-            telegramEnabled: r.telegram_enabled,
-            isCustom: r.is_custom,
-            activePositions: r.active_positions || [],
-            historyData: r.history_data || []
-          }
+          portfolio: mapPgPortfolioRow(r)
         });
       });
       return result;
@@ -435,7 +574,6 @@ export async function dbGetAllPortfoliosWithUsers(): Promise<{ userId: string; p
     }
   }
 
-  // Memory fallback
   for (const [userId, ports] of memoryPortfolios.entries()) {
     ports.forEach(p => {
       if (p.autoPilotEnabled) {
@@ -466,22 +604,22 @@ export async function dbSaveSettings(userId: string, s: any): Promise<void> {
         `INSERT INTO settings (user_id, theme, custom_bg_url, refresh_interval_sec, bg_opacity, bg_blur, bot_token, chat_id, alerts_enabled, updated_at)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, CURRENT_TIMESTAMP)
          ON CONFLICT (user_id) DO UPDATE SET
-           theme = EXCLUDED.theme,
-           custom_bg_url = EXCLUDED.custom_bg_url,
-           refresh_interval_sec = EXCLUDED.refresh_interval_sec,
-           bg_opacity = EXCLUDED.bg_opacity,
-           bg_blur = EXCLUDED.bg_blur,
-           bot_token = EXCLUDED.bot_token,
-           chat_id = EXCLUDED.chat_id,
+           theme = COALESCE(NULLIF(EXCLUDED.theme, ''), settings.theme),
+           custom_bg_url = COALESCE(NULLIF(EXCLUDED.custom_bg_url, ''), settings.custom_bg_url),
+           refresh_interval_sec = COALESCE(EXCLUDED.refresh_interval_sec, settings.refresh_interval_sec),
+           bg_opacity = COALESCE(EXCLUDED.bg_opacity, settings.bg_opacity),
+           bg_blur = COALESCE(EXCLUDED.bg_blur, settings.bg_blur),
+           bot_token = COALESCE(NULLIF(EXCLUDED.bot_token, ''), settings.bot_token),
+           chat_id = COALESCE(NULLIF(EXCLUDED.chat_id, ''), settings.chat_id),
            alerts_enabled = EXCLUDED.alerts_enabled,
            updated_at = CURRENT_TIMESTAMP`,
         [
           userId,
           s.theme || 'dark',
-          s.customBgUrl || '',
-          s.refreshIntervalSec || 4,
-          s.bgOpacity || 85,
-          s.bgBlur || 0,
+          s.customBgUrl || s.custom_bg_url || '',
+          s.refreshIntervalSec || s.refresh_interval_sec || 4,
+          s.bgOpacity ?? s.bg_opacity ?? 85,
+          s.bgBlur ?? s.bg_blur ?? 0,
           s.botToken || s.bot_token || '',
           s.chatId || s.chat_id || '',
           Boolean(s.alertsEnabled ?? s.alerts_enabled ?? true)
@@ -495,5 +633,133 @@ export async function dbSaveSettings(userId: string, s: any): Promise<void> {
 
   const existing = memorySettings.get(userId) || {};
   memorySettings.set(userId, { ...existing, ...s });
+  schedulePersistRuntimeState();
 }
 
+// ==========================================
+// NOTIFICATIONS METHODS (Persistent Background Queue)
+// ==========================================
+export async function dbGetNotifications(userId: string): Promise<AutoPilotNotification[]> {
+  if (isPostgresConnected && pool) {
+    try {
+      const res = await pool.query(
+        `SELECT payload, is_read FROM notifications WHERE user_id = $1 ORDER BY created_at DESC LIMIT 100`,
+        [userId]
+      );
+      return res.rows.map(r => ({
+        ...(r.payload || {}),
+        read: Boolean(r.is_read)
+      }));
+    } catch (e) {
+      console.error('[PostgreSQL] dbGetNotifications error:', e);
+    }
+  }
+
+  const list = memoryNotifications.get(userId) || [];
+  return deduplicateById(list);
+}
+
+export async function dbSaveNotification(userId: string, notif: AutoPilotNotification): Promise<void> {
+  if (!notif || !notif.id) return;
+  const payload: AutoPilotNotification = {
+    ...notif,
+    source: notif.source || 'SERVER_DAEMON',
+    read: Boolean(notif.read)
+  };
+
+  if (isPostgresConnected && pool) {
+    try {
+      await pool.query(
+        `INSERT INTO notifications (id, user_id, payload, is_read)
+         VALUES ($1, $2, $3, $4)
+         ON CONFLICT (id, user_id) DO NOTHING`,
+        [payload.id, userId, JSON.stringify(payload), Boolean(payload.read)]
+      );
+      return;
+    } catch (e) {
+      console.error('[PostgreSQL] dbSaveNotification error:', e);
+    }
+  }
+
+  const list = memoryNotifications.get(userId) || [];
+  if (list.some(x => x.id === payload.id)) return;
+  list.unshift(payload);
+  memoryNotifications.set(userId, list.slice(0, 100));
+  schedulePersistRuntimeState();
+}
+
+export async function dbMarkNotificationsRead(userId: string, ids?: string[]): Promise<void> {
+  if (isPostgresConnected && pool) {
+    try {
+      if (ids && ids.length > 0) {
+        await pool.query(
+          `UPDATE notifications SET is_read = true WHERE user_id = $1 AND id = ANY($2::text[])`,
+          [userId, ids]
+        );
+      } else {
+        await pool.query(
+          `UPDATE notifications SET is_read = true WHERE user_id = $1`,
+          [userId]
+        );
+      }
+      return;
+    } catch (e) {
+      console.error('[PostgreSQL] dbMarkNotificationsRead error:', e);
+    }
+  }
+
+  const list = memoryNotifications.get(userId) || [];
+  const idSet = ids && ids.length > 0 ? new Set(ids) : null;
+  const updated = list.map(n => (!idSet || idSet.has(n.id) ? { ...n, read: true } : n));
+  memoryNotifications.set(userId, updated);
+  schedulePersistRuntimeState();
+}
+
+// ==========================================
+// DAEMON CONFIG METHODS
+// ==========================================
+export async function dbGetDaemonConfig(): Promise<DaemonConfig> {
+  if (isPostgresConnected && pool) {
+    try {
+      const res = await pool.query(`SELECT * FROM daemon_config WHERE id = 'default' LIMIT 1`);
+      if (res.rows.length > 0) {
+        return {
+          intervalMs: Number(res.rows[0].interval_ms) || 15000,
+          forceSessionOpenTest: Boolean(res.rows[0].force_session_open_test)
+        };
+      }
+    } catch (e) {
+      console.error('[PostgreSQL] dbGetDaemonConfig error:', e);
+    }
+  }
+  return { ...memoryDaemonConfig };
+}
+
+export async function dbSaveDaemonConfig(cfg: Partial<DaemonConfig>): Promise<DaemonConfig> {
+  const current = await dbGetDaemonConfig();
+  const next: DaemonConfig = {
+    intervalMs: cfg.intervalMs !== undefined ? Math.max(1000, Number(cfg.intervalMs)) : current.intervalMs,
+    forceSessionOpenTest: cfg.forceSessionOpenTest !== undefined ? Boolean(cfg.forceSessionOpenTest) : current.forceSessionOpenTest
+  };
+
+  if (isPostgresConnected && pool) {
+    try {
+      await pool.query(
+        `INSERT INTO daemon_config (id, interval_ms, force_session_open_test, updated_at)
+         VALUES ('default', $1, $2, CURRENT_TIMESTAMP)
+         ON CONFLICT (id) DO UPDATE SET
+           interval_ms = EXCLUDED.interval_ms,
+           force_session_open_test = EXCLUDED.force_session_open_test,
+           updated_at = CURRENT_TIMESTAMP`,
+        [next.intervalMs, next.forceSessionOpenTest]
+      );
+      return next;
+    } catch (e) {
+      console.error('[PostgreSQL] dbSaveDaemonConfig error:', e);
+    }
+  }
+
+  memoryDaemonConfig = next;
+  schedulePersistRuntimeState();
+  return next;
+}

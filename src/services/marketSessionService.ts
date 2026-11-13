@@ -287,8 +287,13 @@ export class MarketSessionService {
       }
     }
 
-    const commodityTickers = ['XAU', 'XAG', 'XPT', 'BRENT', 'WTI', 'COPPER', 'GAS', 'WHEAT', 'CORN'];
-    if (commodityTickers.some(t => symbolClean.includes(t))) {
+    const cleanBase = symbolClean.replace('.PL', '').replace('.F', '').replace('.WA', '').trim();
+    const exactCommodityBases = new Set(['XAU', 'XAG', 'XPT', 'CB', 'BRENT', 'CL', 'WTI', 'NG', 'NATGAS', 'HG', 'COPPER', 'ZW', 'W', 'WHEAT', 'CORN', 'GOLD', 'SILVER', 'OIL', 'PLATINUM']);
+    const commodityPrefixes = ['XAU', 'XAG', 'XPT', 'BRENT', 'WTI', 'COPPER', 'NATGAS', 'WHEAT', 'CORN', 'CB.', 'CL.', 'NG.', 'HG.', 'ZW.'];
+    if (
+      exactCommodityBases.has(cleanBase) ||
+      commodityPrefixes.some(prefix => symbolClean.startsWith(prefix) || symbolClean.includes(prefix))
+    ) {
       isCommodity = true;
     }
 

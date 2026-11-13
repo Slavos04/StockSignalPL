@@ -12,9 +12,14 @@ import {
   dbGetTrades,
   dbSaveTrade,
   dbGetSettings,
-  dbSaveSettings
+  dbSaveSettings,
+  dbGetNotifications,
+  dbMarkNotificationsRead,
+  dbGetDaemonConfig,
+  dbSaveDaemonConfig
 } from './src/server/db';
 import { ServerAutoPilotDaemon } from './src/server/serverAutoPilotDaemon';
+import { formatWarsawDateTime, formatWarsawTime, WARSAW_TIMEZONE } from './src/utils/dateTime';
 
 async function startServer() {
   const app = express();
@@ -58,7 +63,7 @@ async function startServer() {
         role: user.role,
         status: user.status,
         createdAt: user.created_at,
-        lastLogin: new Date().toLocaleString('pl-PL', { dateStyle: 'short', timeStyle: 'short' })
+        lastLogin: formatWarsawDateTime()
       };
 
       return res.json({ success: true, user: safeUser });
@@ -223,6 +228,7 @@ async function startServer() {
       'COPPER': 'HG=F',
       'XPT': 'PL=F',
       'W': 'ZW=F',
+      'ZW': 'ZW=F',
       'WHEAT': 'ZW=F'
     };
 
@@ -369,7 +375,7 @@ async function startServer() {
           const dateObj = new Date(timestamps[i] * 1000);
           const isIntraday = interval.includes('m');
           const dateStr = isIntraday
-            ? dateObj.toLocaleDateString('pl-PL', { month: '2-digit', day: '2-digit' }) + ' ' + dateObj.toLocaleTimeString('pl-PL', { hour: '2-digit', minute: '2-digit' })
+            ? dateObj.toLocaleDateString('pl-PL', { timeZone: WARSAW_TIMEZONE, month: '2-digit', day: '2-digit' }) + ' ' + dateObj.toLocaleTimeString('pl-PL', { timeZone: WARSAW_TIMEZONE, hour: '2-digit', minute: '2-digit' })
             : dateObj.toISOString().split('T')[0];
 
           const change = Number((c - o).toFixed(2));
@@ -429,10 +435,11 @@ async function startServer() {
   app.get('/api/market-quotes', async (req: Request, res: Response) => {
     const rawSymbols = (req.query.symbols as string) || '';
     const symbols = rawSymbols ? rawSymbols.split(',') : [
-      'PKN.PL', 'KGH.PL', 'PKO.PL', 'PZU.PL', 'DNP.PL', 'LPP.PL', 'CDR.PL', 'ALE.PL',
-      'PEO.PL', 'KRU.PL', 'XTB.PL', 'TPE.PL', 'PGE.PL', 'CPS.PL', 'BDX.PL', 'CAR.PL',
-      '11B.PL', 'ACP.PL', 'MIL.PL', 'ENA.PL', 'OPL.PL', 'JSW.PL', 'KTY.PL', 'SAN.PL',
-      'WIG20', 'XAU.PL', 'XAG.PL', 'BRENT', 'CL.F', 'NG.F'
+      'PKN.PL', 'KGH.PL', 'PKO.PL', 'CDR.PL', 'PEO.PL', 'DNP.PL', 'LPP.PL', 'SPL.PL',
+      'PZU.PL', 'ALR.PL', 'KRU.PL', 'KTY.PL', 'JSW.PL', 'XTB.PL', 'TPE.PL', 'CPS.PL',
+      'PGE.PL', 'BDX.PL', 'MBK.PL', 'OPL.PL', 'ENA.PL', 'CCC.PL', 'CAR.PL', 'MIL.PL',
+      'ACP.PL', '11B.PL', 'MLS.PL', 'TOR.PL', 'PLW.PL', 'BIO.PL', 'CLD.PL', 'ALE.PL',
+      'FW2020.PL', 'WIG20', 'XAU.PL', 'XAG.PL', 'XPT.PL', 'CB.F', 'CL.F', 'HG.F', 'NG.F', 'ZW.F'
     ];
 
     const usdPlnRate = await getUsdPlnRate();
@@ -445,67 +452,76 @@ async function startServer() {
 
     try {
       const quotes: any[] = [];
+      const uniqueSymbols = Array.from(new Set(symbols.map(s => s.trim()).filter(Boolean)));
+      const BATCH_SIZE = 8;
 
-      for (const sym of symbols) {
-        const cleanSym = sym.trim();
-        if (!cleanSym) continue;
-        const { ticker, isCommodity, isEur } = mapSymbolToMarket(cleanSym);
+      for (let i = 0; i < uniqueSymbols.length; i += BATCH_SIZE) {
+        const batch = uniqueSymbols.slice(i, i + BATCH_SIZE);
+        const batchResults = await Promise.all(
+          batch.map(async (cleanSym) => {
+            const { ticker, isCommodity, isEur } = mapSymbolToMarket(cleanSym);
+            try {
+              const chart = await fetchYahooChartData(ticker, '5d', '1d');
+              const meta = chart.meta;
+              const q = chart.indicators?.quote?.[0];
+              const lastIdx = (chart.timestamp?.length || 1) - 1;
 
-        try {
-          const chart = await fetchYahooChartData(ticker, '5d', '1d');
-          const meta = chart.meta;
-          const q = chart.indicators?.quote?.[0];
-          const lastIdx = (chart.timestamp?.length || 1) - 1;
+              let price = meta.regularMarketPrice ?? q?.close?.[lastIdx];
+              let prevClose = meta.chartPreviousClose ?? q?.close?.[Math.max(0, lastIdx - 1)];
+              let high = meta.regularMarketDayHigh ?? q?.high?.[lastIdx];
+              let low = meta.regularMarketDayLow ?? q?.low?.[lastIdx];
+              const volume = meta.regularMarketVolume ?? q?.volume?.[lastIdx] ?? 0;
 
-          let price = meta.regularMarketPrice ?? q?.close?.[lastIdx];
-          let prevClose = meta.chartPreviousClose ?? q?.close?.[Math.max(0, lastIdx - 1)];
-          let high = meta.regularMarketDayHigh ?? q?.high?.[lastIdx];
-          let low = meta.regularMarketDayLow ?? q?.low?.[lastIdx];
-          const volume = meta.regularMarketVolume ?? q?.volume?.[lastIdx] ?? 0;
+              if (price == null || isNaN(price)) return null;
 
-          const priceUsd = isCommodity ? Number(price.toFixed(2)) : undefined;
+              const priceUsd = isCommodity ? Number(price.toFixed(2)) : undefined;
 
-          if (isCommodity) {
-            price = price * usdPlnRate;
-            if (prevClose) prevClose = prevClose * usdPlnRate;
-            if (high) high = high * usdPlnRate;
-            if (low) low = low * usdPlnRate;
-          } else if (isEur) {
-            const eurRate = 4.28;
-            price = price * eurRate;
-            if (prevClose) prevClose = prevClose * eurRate;
-            if (high) high = high * eurRate;
-            if (low) low = low * eurRate;
-          }
+              if (isCommodity) {
+                price = price * usdPlnRate;
+                if (prevClose) prevClose = prevClose * usdPlnRate;
+                if (high) high = high * usdPlnRate;
+                if (low) low = low * usdPlnRate;
+              } else if (isEur) {
+                const eurRate = 4.28;
+                price = price * eurRate;
+                if (prevClose) prevClose = prevClose * eurRate;
+                if (high) high = high * eurRate;
+                if (low) low = low * eurRate;
+              }
 
-          price = Number(price.toFixed(2));
-          prevClose = prevClose ? Number(prevClose.toFixed(2)) : price;
-          high = high ? Number(high.toFixed(2)) : price;
-          low = low ? Number(low.toFixed(2)) : price;
+              price = Number(price.toFixed(2));
+              prevClose = prevClose ? Number(prevClose.toFixed(2)) : price;
+              high = high ? Number(high.toFixed(2)) : price;
+              low = low ? Number(low.toFixed(2)) : price;
 
-          const change = Number((price - prevClose).toFixed(2));
-          const changePercent = prevClose > 0 ? Number(((change / prevClose) * 100).toFixed(2)) : 0;
+              const change = Number((price - prevClose).toFixed(2));
+              const changePercent = prevClose > 0 ? Number(((change / prevClose) * 100).toFixed(2)) : 0;
 
-          quotes.push({
-            symbol: cleanSym.toUpperCase(),
-            marketTicker: ticker,
-            price,
-            priceUsd,
-            previousClose: prevClose,
-            open: prevClose,
-            high,
-            low,
-            change,
-            changePercent,
-            volume,
-            isCommodity,
-            currency: isCommodity ? 'USD/PLN' : 'PLN',
-            regularMarketTime: meta.regularMarketTime,
-            isReal: true
-          });
-        } catch {
-          // If a single ticker fails, skip gracefully
-        }
+              return {
+                symbol: cleanSym.toUpperCase(),
+                marketTicker: ticker,
+                price,
+                priceUsd,
+                previousClose: prevClose,
+                open: prevClose,
+                high,
+                low,
+                change,
+                changePercent,
+                volume,
+                isCommodity,
+                currency: isCommodity ? 'USD/PLN' : 'PLN',
+                regularMarketTime: meta.regularMarketTime,
+                isReal: true
+              };
+            } catch {
+              return null;
+            }
+          })
+        );
+        batchResults.forEach(item => {
+          if (item) quotes.push(item);
+        });
       }
 
       const responsePayload = {
@@ -746,10 +762,11 @@ async function startServer() {
     const minute = now.getMinutes();
     const currentSlot = `${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}`;
 
-    // Run at 09:00 AM session open or 18:30 PM post-session ESPI reports
-    if ((currentSlot === '09:00' || currentSlot === '18:30') && lastCronRunSlot !== currentSlot) {
-      lastCronRunSlot = currentSlot;
-      console.log(`[StockSignalPl Cron] Running automated 2x daily recommendation feed sync at ${now.toLocaleTimeString('pl-PL')} (${currentSlot})...`);
+    // Run at 09:00 AM session open or 18:30 PM post-session ESPI reports (Europe/Warsaw)
+    const warsawSlot = formatWarsawTime(now).slice(0, 5);
+    if ((warsawSlot === '09:00' || warsawSlot === '18:30') && lastCronRunSlot !== warsawSlot) {
+      lastCronRunSlot = warsawSlot;
+      console.log(`[StockSignalPl Cron] Running automated 2x daily recommendation feed sync at ${formatWarsawDateTime(now)} (${warsawSlot})...`);
       HISTORICAL_MONTH_REPORTS.forEach(item => {
         const key = getReportKey(item);
         if (!storedAutoReportsMap.has(key)) {
@@ -778,7 +795,7 @@ async function startServer() {
       return res.json({
         success: true,
         source: 'Automatyczne Feedy API / RSS (GPW, BiznesRadar, StockWatch, Domy Maklerskie)',
-        fetchedAt: new Date().toLocaleTimeString('pl-PL'),
+        fetchedAt: formatWarsawTime(),
         totalInDatabase: storedAutoReportsMap.size,
         newCount: newOnlyReports.length,
         reports: newOnlyReports
@@ -836,7 +853,31 @@ async function startServer() {
     }
   });
 
-  app.get('/api/admin/daemon-settings', async (req: Request, res: Response) => {
+  // ==========================================
+  // 5.6 BACKGROUND AUTOPILOT NOTIFICATIONS QUEUE
+  // ==========================================
+  app.get('/api/notifications', async (req: Request, res: Response) => {
+    try {
+      const userId = (req.query.userId as string) || (req.headers['x-user-id'] as string) || 'usr_admin';
+      const notifications = await dbGetNotifications(userId);
+      return res.json({ success: true, notifications });
+    } catch (err: any) {
+      return res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  app.post('/api/notifications/read', async (req: Request, res: Response) => {
+    try {
+      const userId = (req.body.userId as string) || (req.headers['x-user-id'] as string) || 'usr_admin';
+      const ids = Array.isArray(req.body.ids) ? req.body.ids : undefined;
+      await dbMarkNotificationsRead(userId, ids);
+      return res.json({ success: true });
+    } catch (err: any) {
+      return res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  app.get('/api/admin/daemon-settings', async (_req: Request, res: Response) => {
     try {
       const status = await ServerAutoPilotDaemon.getStatus();
       return res.json({
@@ -851,19 +892,41 @@ async function startServer() {
   app.post('/api/admin/daemon-settings', async (req: Request, res: Response) => {
     try {
       const { intervalMs, forceSessionOpenTest } = req.body;
+      let nextInterval: number | undefined;
+      let nextForce: boolean | undefined;
       if (intervalMs !== undefined) {
         const parsedInterval = parseInt(intervalMs, 10);
         if (!isNaN(parsedInterval) && parsedInterval >= 1000) {
           ServerAutoPilotDaemon.setIntervalMs(parsedInterval);
+          nextInterval = parsedInterval;
         }
       }
       if (forceSessionOpenTest !== undefined) {
-        ServerAutoPilotDaemon.setForceSessionOpenTest(Boolean(forceSessionOpenTest));
+        nextForce = Boolean(forceSessionOpenTest);
+        ServerAutoPilotDaemon.setForceSessionOpenTest(nextForce);
       }
+      await dbSaveDaemonConfig({
+        ...(nextInterval !== undefined ? { intervalMs: nextInterval } : {}),
+        ...(nextForce !== undefined ? { forceSessionOpenTest: nextForce } : {})
+      });
       const status = await ServerAutoPilotDaemon.getStatus();
       return res.json({
         success: true,
         message: 'Pomyślnie zaktualizowano parametry silnika serwerowego.',
+        ...status
+      });
+    } catch (err: any) {
+      return res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  app.post('/api/admin/daemon-run', async (_req: Request, res: Response) => {
+    try {
+      await ServerAutoPilotDaemon.executeCycle();
+      const status = await ServerAutoPilotDaemon.getStatus();
+      return res.json({
+        success: true,
+        message: 'Wykonano natychmiastowy cykl sprawdzania rynku na serwerze.',
         ...status
       });
     } catch (err: any) {
@@ -888,10 +951,12 @@ async function startServer() {
     app.use(vite.middlewares);
   }
 
+  const savedDaemonConfig = await dbGetDaemonConfig();
+
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`[StockSignalPl] Server running on http://0.0.0.0:${PORT} (PostgreSQL mode)`);
-    // Start autonomous server-side Auto-Pilot daemon (24/7 autonomous order execution)
-    ServerAutoPilotDaemon.start(15000);
+    ServerAutoPilotDaemon.setForceSessionOpenTest(savedDaemonConfig.forceSessionOpenTest);
+    ServerAutoPilotDaemon.start(savedDaemonConfig.intervalMs || 15000);
   });
 }
 

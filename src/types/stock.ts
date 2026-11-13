@@ -273,11 +273,14 @@ export interface AutoPilotNotification {
   message: string;
   ticker: string;
   portfolioName: string;
+  portfolioId?: string;
   shares: number;
   pricePln: number;
   totalPln: number;
   resultPln?: number;
-  timestamp: string;
+  timestamp: string; // Dokładna data i godzina transakcji (DD.MM.YYYY, HH:MM:SS Europe/Warsaw)
+  executedAtIso?: string;
+  deliveredAt?: string; // Godzina wyświetlenia / dostarczenia powiadomienia w przeglądarce
+  source?: 'SERVER_DAEMON' | 'BROWSER_LIVE';
+  read?: boolean;
 }
-
-

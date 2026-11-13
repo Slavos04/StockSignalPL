@@ -16,6 +16,20 @@ CHANGELOG - HISTORIA ZMIAN I WERSJI STOCKSIGNALPL
 ================================================================================
 
 ================================================================================
+Wersja 2.4.5 (2026-11-12) - Autonomiczny Handel w Tle 24/7 bez Przeglądarki, Trwała Kolejka Powiadomień & Czas Transakcji CET/CEST
+================================================================================
+1. PRAWDZIWY HANDEL W TLE 24/7 NA SERWERZE (PEŁNA NIEZALEŻNOŚĆ OD PRZEGLĄDARKI):
+   - Wyeliminowano konkurencyjne wykonywanie zleceń Auto-Pilota w oknie przeglądarki — wyłącznym egzekutorem jest autonomiczny demon ServerAutoPilotDaemon na serwerze Node.js.
+   - Demon analizuje teraz pełną listę wszystkich walorów (akcje GPW, surowce, NewConnect, FW20) przy każdym cyklu, z zachowaniem identycznego algorytmu oceny konsensusu jak w widoku Live.
+   - Naprawiono trwałość stanu (zapis na dysku w trybie fallback oraz tabele notifications i daemon_config w PostgreSQL), dzięki czemu konfiguracja interwału i tryb sesji przetrwają restart serwera.
+   - Naprawiono pomniejszanie wolumenu akcji (shares) przy częściowych realizacjach TP1 (33%) i TP2 (33%) oraz przeliczanie wartości portfela po zamknięciu lub redukcji pozycji.
+
+2. ROZRÓŻNIENIE DATY TRANSAKCJI OD GODZINY DOSTARCZENIA POWIADOMIENIA:
+   - Wszystkie transakcje, logi audytowe bota, alerty Telegram oraz powiadomienia zapisują dokładną datę i godzinę wykonania na serwerze w strefie Europe/Warsaw (DD.MM.YYYY, HH:MM:SS).
+   - Dodano Centrum Powiadomień (ikona dzwonka w górnym pasku) oraz wyraźne rozdzielenie na Toastach między „Transakcja: DD.MM.YYYY, HH:MM:SS” a „Odebrano w przeglądarce: HH:MM:SS”.
+   - Poprawiono sortowanie chronologiczne historii zleceń w Dzienniku Tradera GPW oraz dodano przycisk ręcznego wymuszenia cyklu demona w panelu Admina.
+
+================================================================================
 Wersja 2.4 (2026-11-09) - Panel Częstotliwości Silnika Auto-Pilota 24/7 w Panelu Admina (15s do 4g) & Przygotowanie Wydania
 ================================================================================
 1. ZARZĄDZANIE CZĘSTOTLIWOŚCIĄ PRACY SILNIKA SERWEROWEGO 24/7 W PANELU ADMINA:
@@ -499,7 +513,7 @@ Wersja 1.0 (2026-11-04) - Oficjalne Wydanie StockSignalPl
                   <span className="text-emerald-400">PL</span>
                 </h3>
                 <span className="px-2 py-0.5 text-xs font-bold bg-emerald-950 text-emerald-300 border border-emerald-500/60 rounded-full shadow-sm">
-                  v2.4.4
+                  v2.4.5
                 </span>
               </div>
               <p className="text-xs text-slate-400">Polski Rynek Giełdowy GPW Warszawa & Rynek Surowców</p>

@@ -62,6 +62,7 @@ export const TabAdminSettings: React.FC<TabAdminSettingsProps> = ({
   // Server AutoPilot Daemon interval state (Tylko Administrator)
   const [daemonIntervalMs, setDaemonIntervalMs] = useState<number>(15000);
   const [isSavingDaemonInterval, setIsSavingDaemonInterval] = useState<boolean>(false);
+  const [isTriggeringDaemon, setIsTriggeringDaemon] = useState<boolean>(false);
   const [daemonMessage, setDaemonMessage] = useState<string | null>(null);
   const [daemonSummary, setDaemonSummary] = useState<string>('Silnik gotowy');
   const [monitoredCount, setMonitoredCount] = useState<number>(0);
@@ -129,6 +130,27 @@ export const TabAdminSettings: React.FC<TabAdminSettingsProps> = ({
     } catch {
       setDaemonMessage('Błąd zmiany trybu sesji demona.');
       setTimeout(() => setDaemonMessage(null), 4000);
+    }
+  };
+
+  const handleTriggerDaemonNow = async () => {
+    setIsTriggeringDaemon(true);
+    try {
+      const res = await fetch('/api/admin/daemon-run', { method: 'POST' });
+      const data = await res.json();
+      if (data.success) {
+        if (data.lastExecutionSummary) setDaemonSummary(data.lastExecutionSummary);
+        if (data.monitoredPortfoliosCount !== undefined) setMonitoredCount(data.monitoredPortfoliosCount);
+        setDaemonMessage('Wykonano natychmiastowy cykl silnika Auto-Pilota na serwerze.');
+      } else {
+        setDaemonMessage(data.error || 'Nie udało się uruchomić cyklu silnika.');
+      }
+      setTimeout(() => setDaemonMessage(null), 4000);
+    } catch {
+      setDaemonMessage('Błąd połączenia z demonem serwerowym.');
+      setTimeout(() => setDaemonMessage(null), 4000);
+    } finally {
+      setIsTriggeringDaemon(false);
     }
   };
 
@@ -793,20 +815,31 @@ XAU KUPUJ Cena: 16133.00 Target: 18500.00`
                 <div className="text-slate-400">
                   Transakcje TP/SL i zakupy Auto-Pilota są egzekwowane bezpośrednio na serwerze niezależnie od tego, czy użytkownik jest zalogowany i czy okno przeglądarki jest włączone.
                 </div>
-                <button
-                  onClick={handleToggleForceSession}
-                  className={`px-3 py-1 rounded-xl text-xs font-bold border transition-all cursor-pointer flex items-center gap-1.5 ${
-                    daemonForceSession
-                      ? 'bg-amber-950/80 text-amber-300 border-amber-500/60 shadow-sm'
-                      : 'bg-slate-900 hover:bg-slate-800 text-slate-300 border-slate-700'
-                  }`}
-                  title="Wymuś aktywność silnika transakcyjnego 24/7 również poza godzinami sesji GPW do celów testowych"
-                >
-                  <span>Tryb 24/7 Sesji (Testy poza GPW):</span>
-                  <span className={`px-1.5 py-0.2 rounded text-[10px] font-black ${daemonForceSession ? 'bg-amber-500 text-slate-950' : 'bg-slate-800 text-slate-400'}`}>
-                    {daemonForceSession ? 'WŁĄCZONY' : 'WYŁĄCZONY'}
-                  </span>
-                </button>
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    onClick={handleTriggerDaemonNow}
+                    disabled={isTriggeringDaemon}
+                    className="px-3 py-1 rounded-xl text-xs font-bold border bg-cyan-950/80 hover:bg-cyan-900/80 text-cyan-200 border-cyan-500/50 transition-all cursor-pointer flex items-center gap-1.5 disabled:opacity-50"
+                    title="Uruchom natychmiastowy cykl sprawdzania rynku i zleceń na serwerze"
+                  >
+                    <RotateCcw className={`w-3.5 h-3.5 ${isTriggeringDaemon ? 'animate-spin' : ''}`} />
+                    <span>{isTriggeringDaemon ? 'Wykonywanie...' : 'Wymuś cykl teraz'}</span>
+                  </button>
+                  <button
+                    onClick={handleToggleForceSession}
+                    className={`px-3 py-1 rounded-xl text-xs font-bold border transition-all cursor-pointer flex items-center gap-1.5 ${
+                      daemonForceSession
+                        ? 'bg-amber-950/80 text-amber-300 border-amber-500/60 shadow-sm'
+                        : 'bg-slate-900 hover:bg-slate-800 text-slate-300 border-slate-700'
+                    }`}
+                    title="Wymuś aktywność silnika transakcyjnego 24/7 również poza godzinami sesji GPW do celów testowych"
+                  >
+                    <span>Tryb 24/7 Sesji (Testy poza GPW):</span>
+                    <span className={`px-1.5 py-0.2 rounded text-[10px] font-black ${daemonForceSession ? 'bg-amber-500 text-slate-950' : 'bg-slate-800 text-slate-400'}`}>
+                      {daemonForceSession ? 'WŁĄCZONY' : 'WYŁĄCZONY'}
+                    </span>
+                  </button>
+                </div>
               </div>
             </div>
           </div>

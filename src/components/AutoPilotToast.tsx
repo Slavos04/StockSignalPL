@@ -26,12 +26,13 @@ const ToastItem: React.FC<{ notification: AutoPilotNotification; onDismiss: (id:
   useEffect(() => {
     const timer = setTimeout(() => {
       onDismiss(notification.id);
-    }, 6000);
+    }, 10000);
     return () => clearTimeout(timer);
   }, [notification.id, onDismiss]);
 
   const isBuy = notification.type === 'BUY';
   const isTp = notification.type === 'SELL_TP';
+  const isServerDaemon = notification.source === 'SERVER_DAEMON';
 
   return (
     <div className="pointer-events-auto bg-slate-900/95 border border-slate-700/80 rounded-2xl p-4 shadow-2xl backdrop-blur-xl animate-slide-in relative overflow-hidden text-xs">
@@ -56,7 +57,7 @@ const ToastItem: React.FC<{ notification: AutoPilotNotification; onDismiss: (id:
             <Bot className="w-4 h-4 animate-pulse" />
           </div>
           <div>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-1.5">
               <span className="font-bold text-white text-sm">{notification.title}</span>
               <span
                 className={`px-2 py-0.5 rounded text-[10px] font-bold border ${
@@ -69,8 +70,19 @@ const ToastItem: React.FC<{ notification: AutoPilotNotification; onDismiss: (id:
               >
                 {isBuy ? 'KUPNO GPW' : isTp ? 'ZYSK (TP)' : 'STOP LOSS'}
               </span>
+              {isServerDaemon && (
+                <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-cyan-950/90 text-cyan-300 border border-cyan-600/50">
+                  SERWER 24/7 (W TLE)
+                </span>
+              )}
             </div>
-            <p className="text-[11px] text-slate-400 mt-0.5">{notification.timestamp} • {notification.portfolioName}</p>
+            <p className="text-[11px] text-slate-300 mt-1 font-medium">
+              📅 Transakcja: <span className="font-mono text-emerald-300">{notification.timestamp}</span>
+            </p>
+            <p className="text-[10px] text-slate-400">
+              {notification.portfolioName}
+              {notification.deliveredAt ? ` • Odebrano w przeglądarce: ${notification.deliveredAt}` : ''}
+            </p>
           </div>
         </div>
 

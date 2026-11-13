@@ -1,30 +1,51 @@
 import http from 'http';
 import https from 'https';
-import { dbGetAllPortfoliosWithUsers, dbSavePortfolio, dbSaveTrade, dbGetSettings } from './db';
+import {
+  dbGetAllPortfoliosWithUsers,
+  dbSavePortfolio,
+  dbSaveTrade,
+  dbGetSettings,
+  dbSaveNotification
+} from './db';
 import { MarketSessionService } from '../services/marketSessionService';
+import { INITIAL_STOCKS } from '../data/initialData';
+import { enrichStockSignalsPure } from '../utils/stockSignals';
+import { formatWarsawDateTime, formatWarsawIsoDate, formatWarsawTime } from '../utils/dateTime';
+import type { StockQuote } from '../types/stock';
 
 interface MarketQuote {
   symbol: string;
+  name: string;
   price: number;
   change: number;
   changePercent: number;
-  trendScore?: number;
-  rsi14?: number;
-  macdHist?: number;
+  trendScore: number;
+  rsi14: number;
+  macdHist: number;
   analystRecommendation?: string;
-  market?: 'GPW' | 'Surowce' | 'NewConnect' | 'FW20';
-  isCommodity?: boolean;
+  market: StockQuote['market'];
+  isCommodity: boolean;
 }
 
-const DEFAULT_WATCHLIST = [
-  'PKN', 'KGH', 'PKO', 'PZU', 'CDR', 'DNP', 'LPP', 'ALE', 'PEO', 'KRU',
-  'XTB', 'TPE', 'PGE', 'CPS', 'BDX', 'CAR', '11B', 'ACP', 'MIL', 'ENA',
-  'OPL', 'JSW', 'KTY', 'SAN', 'CCC', 'MLS', 'CLD', 'XAU', 'XAG', 'CB',
-  'CL', 'NG', 'FW20', 'XPT', 'ZW'
-];
+const DEFAULT_WATCHLIST = Array.from(
+  new Set([
+    ...INITIAL_STOCKS.map(s => s.symbol),
+    'WIG20'
+  ])
+);
+
+const normTicker = (s: string): string =>
+  (s || '').toUpperCase().replace('.PL', '').replace('.WA', '').replace('.F', '').trim();
+
+let seqCounter = 0;
+function nextId(prefix: string, ticker: string): string {
+  seqCounter = (seqCounter + 1) % 100000;
+  return `${prefix}_${Date.now()}_${seqCounter}_${normTicker(ticker)}`;
+}
 
 export class ServerAutoPilotDaemon {
   private static isRunning = false;
+  private static isCycleExecuting = false;
   private static intervalHandle: NodeJS.Timeout | null = null;
   private static lastRunTimestamp: number = 0;
   private static currentIntervalMs: number = 15000;
@@ -39,16 +60,14 @@ export class ServerAutoPilotDaemon {
    */
   public static start(intervalMs: number = 15000): void {
     if (this.isRunning) return;
-    this.currentIntervalMs = intervalMs;
+    this.currentIntervalMs = Math.max(1000, intervalMs);
     this.isRunning = true;
-    console.log(`[AutoPilot Daemon] 🤖 Inicjalizacja Autonomicznego Silnika Bota 24/7 (interwał: ${intervalMs / 1000}s)...`);
+    console.log(`[AutoPilot Daemon] 🤖 Inicjalizacja Autonomicznego Silnika Bota 24/7 (interwał: ${this.currentIntervalMs / 1000}s)...`);
 
-    // Pierwszy cykl po 3 sekundach od startu serwera
     setTimeout(() => {
       this.executeCycle().catch(err => console.error('[AutoPilot Daemon] Błąd pierwszego cyklu:', err));
-    }, 3000);
+    }, 2500);
 
-    // Główna pętla w tle serwera
     this.intervalHandle = setInterval(() => {
       this.executeCycle().catch(err => console.error('[AutoPilot Daemon] Błąd cyklu:', err));
     }, this.currentIntervalMs);
@@ -107,16 +126,17 @@ export class ServerAutoPilotDaemon {
   }
 
   /**
-   * Główny cykl egzekucyjny Auto-Pilota:
-   * 1. Odpytuje bazę danych o wszystkie portfele użytkowników z włączonym Auto-Pilotem
-   * 2. Zgłasza zapotrzebowanie na notowania (w tym wszystkie aktywne pozycje)
-   * 3. Pobiera świeże kursy rynkowe GPW i Surowców z wewnętrznego endpointu HTTP
-   * 4. Weryfikuje warunki Stop Loss i Take Profit (TP1/TP2/TP3)
-   * 5. Wyszukuje silne okazje i automatycznie zawiera nowe transakcje
-   * 6. Zapisuje zaktualizowane salda i pozycje bezpośrednio w PostgreSQL / buforze serwera
-   * 7. Wysyła alerty Telegram z dokładną datą i godziną egzekucji transakcji
+   * Główny cykl egzekucyjny Auto-Pilota na serwerze 24/7:
+   * - Zawsze pobiera realne kursy z /api/market-quotes i łączy z fundamentami INITIAL_STOCKS
+   * - Aktualizuje bieżącą wycenę wszystkich otwartych pozycji i salda portfeli
+   * - Realizuje TP1 (33%), TP2 (33%), TP3 (34%) oraz Stop Loss (z prawidłowym zmniejszaniem liczby akcji!)
+   * - Dokonuje nowych zakupów przy spełnieniu warunków strategii (w godzinach sesji lub trybie testowym)
+   * - Zapisuje historię transakcji oraz powiadomienia z dokładną datą i godziną transakcji (Europe/Warsaw)
    */
   public static async executeCycle(): Promise<void> {
+    if (this.isCycleExecuting) return;
+    this.isCycleExecuting = true;
+
     try {
       this.lastRunTimestamp = Date.now();
       this.cyclesCount++;
@@ -127,7 +147,6 @@ export class ServerAutoPilotDaemon {
         return;
       }
 
-      // Zbierz tickery ze wszystkich otwartych pozycji portfeli
       const dynamicSymbols = new Set<string>();
       userPortfolios.forEach(item => {
         (item.portfolio.activePositions || []).forEach((pos: any) => {
@@ -137,13 +156,15 @@ export class ServerAutoPilotDaemon {
 
       const quotes = await this.fetchLiveQuotes(Array.from(dynamicSymbols));
       if (!quotes || quotes.length === 0) {
-        this.lastExecutionSummary = 'Oczekiwanie na feed notowań rynkowych';
+        this.lastExecutionSummary = `Oczekiwanie na feed notowań (${formatWarsawTime()})`;
         return;
       }
 
       let totalOrdersExecuted = 0;
       const now = new Date();
-      const norm = (s: string) => (s || '').toUpperCase().replace('.PL', '').replace('.WA', '').replace('.F', '').trim();
+      const dateStr = formatWarsawDateTime(now);
+      const timeStr = formatWarsawTime(now);
+      const isoDateStr = formatWarsawIsoDate(now);
 
       for (const item of userPortfolios) {
         const { userId, portfolio } = item;
@@ -154,68 +175,76 @@ export class ServerAutoPilotDaemon {
         const positions = portfolio.activePositions || [];
 
         // ---------------------------------------------------------------------
-        // KROK 1: Weryfikacja zleceń TP / SL dla otwartych pozycji
+        // KROK 1: Aktualizacja wyceny otwartych pozycji & realizacja TP / SL
         // ---------------------------------------------------------------------
         for (const pos of positions) {
-          const quote = quotes.find(q => norm(q.symbol) === norm(pos.ticker));
+          const quote = quotes.find(q => normTicker(q.symbol) === normTicker(pos.ticker));
 
-          if (!quote) {
-            remainingPositions.push(pos);
+          if (!quote || pos.shares <= 0) {
+            if (pos.shares > 0) remainingPositions.push(pos);
             continue;
           }
 
-          // Zawsze aktualizuj bieżącą cenę rynkową i zysk/stratę z bieżącego ticka
+          if (Math.abs((pos.currentPrice || 0) - quote.price) >= 0.005) {
+            portfolioChanged = true;
+          }
+
           pos.currentPrice = quote.price;
           const isShort = pos.positionSide === 'SHORT';
 
-          pos.pnlPln = isShort
-            ? Number(((pos.entryPrice - pos.currentPrice) * pos.shares).toFixed(2))
-            : Number(((pos.currentPrice - pos.entryPrice) * pos.shares).toFixed(2));
+          const calcPnlPln = (sharesCount: number) =>
+            isShort
+              ? Number(((pos.entryPrice - pos.currentPrice) * sharesCount).toFixed(2))
+              : Number(((pos.currentPrice - pos.entryPrice) * sharesCount).toFixed(2));
 
-          pos.pnlPercent = isShort
-            ? Number((((pos.entryPrice - pos.currentPrice) / pos.entryPrice) * 100).toFixed(2))
-            : Number((((pos.currentPrice - pos.entryPrice) / pos.entryPrice) * 100).toFixed(2));
+          const calcPnlPct = () =>
+            pos.entryPrice > 0
+              ? isShort
+                ? Number((((pos.entryPrice - pos.currentPrice) / pos.entryPrice) * 100).toFixed(2))
+                : Number((((pos.currentPrice - pos.entryPrice) / pos.entryPrice) * 100).toFixed(2))
+              : 0;
+
+          pos.pnlPln = calcPnlPln(pos.shares);
+          pos.pnlPercent = calcPnlPct();
 
           // Weryfikacja czy rynek jest aktualnie otwarty dla tego waloru (lub czy trwa test wymuszonej sesji)
-          const marketCheck = MarketSessionService.isMarketOpenForStock(pos.ticker, now, this.forceSessionOpenTest);
+          const marketCheck = MarketSessionService.isMarketOpenForStock(
+            { symbol: pos.ticker, market: quote.market },
+            now,
+            this.forceSessionOpenTest
+          );
           if (!marketCheck.isOpen) {
             remainingPositions.push(pos);
             continue;
           }
-
-          const executionTimeStr = now.toLocaleTimeString('pl-PL', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-          const executionDateStr = now.toLocaleDateString('pl-PL');
-          const dateStr = `${executionDateStr}, ${executionTimeStr}`;
 
           // 1. Osiągnięcie TP1 (33% wolumenu) -> realizacja 33% i przesunięcie SL na Break-Even
           const hitTp1 = isShort
             ? (!pos.tp1Reached && pos.currentPrice <= pos.targetPrice1)
             : (!pos.tp1Reached && pos.currentPrice >= pos.targetPrice1);
 
-          if (hitTp1) {
+          if (hitTp1 && pos.shares > 0) {
             pos.tp1Reached = true;
             pos.status = 'ZREALIZOWANO TP1';
             pos.stopLoss = isShort
               ? Math.min(pos.stopLoss, pos.entryPrice)
-              : Math.max(pos.stopLoss, pos.entryPrice); // Break-Even
+              : Math.max(pos.stopLoss, pos.entryPrice);
 
-            const soldShares = Math.max(1, Math.floor(pos.shares * 0.33));
+            const soldShares = Math.min(pos.shares, Math.max(1, Math.floor(pos.shares * 0.33)));
+            pos.shares = Math.max(0, pos.shares - soldShares);
+            pos.pnlPln = calcPnlPln(pos.shares);
+
             const returnCash = Number((soldShares * pos.currentPrice).toFixed(2));
-            const pnlPart = isShort
-              ? Number(((pos.entryPrice - pos.currentPrice) * soldShares).toFixed(2))
-              : Number(((pos.currentPrice - pos.entryPrice) * soldShares).toFixed(2));
-
-            portfolio.cashPln = Number((portfolio.cashPln + returnCash).toFixed(2));
-            portfolio.allocatedPln = Math.max(0, Number((portfolio.allocatedPln - (soldShares * pos.entryPrice)).toFixed(2)));
-            portfolio.currentBalance = Number((portfolio.cashPln + portfolio.allocatedPln).toFixed(2));
-            portfolio.totalProfitPln = Number((portfolio.totalProfitPln + pnlPart).toFixed(2));
+            const pnlPart = calcPnlPln(soldShares);
+            portfolio.cashPln = Number(((portfolio.cashPln || 0) + returnCash).toFixed(2));
 
             const tradeLog = {
-              id: `tr_srv_${Date.now()}_tp1`,
+              id: nextId('tr_srv_tp1', pos.ticker),
               date: dateStr,
               ticker: pos.ticker,
               name: pos.name,
-              type: isShort ? 'KUPNO' : 'SPRZEDAŻ',
+              type: isShort ? 'ZAMKNIĘCIE_SHORT' : 'SPRZEDAŻ',
+              positionSide: pos.positionSide || 'LONG',
               pricePln: pos.currentPrice,
               shares: soldShares,
               totalPln: returnCash,
@@ -227,10 +256,27 @@ export class ServerAutoPilotDaemon {
             };
 
             await dbSaveTrade(userId, tradeLog);
+            await dbSaveNotification(userId, {
+              id: nextId('notif_srv_tp1', pos.ticker),
+              type: 'SELL_TP',
+              title: '🤖 Serwer 24/7: Realizacja TP1 (33%)',
+              message: `Zrealizowano 33% pozycji ${pos.ticker} (${soldShares} szt.) po ${pos.currentPrice.toFixed(2)} zł. SL na Break-Even!`,
+              ticker: pos.ticker,
+              portfolioName: portfolio.name,
+              portfolioId: portfolio.id,
+              shares: soldShares,
+              pricePln: pos.currentPrice,
+              totalPln: returnCash,
+              resultPln: pnlPart,
+              timestamp: dateStr,
+              executedAtIso: now.toISOString(),
+              source: 'SERVER_DAEMON',
+              read: false
+            });
+
             portfolioChanged = true;
             totalOrdersExecuted++;
-
-            console.log(`[AutoPilot Daemon] 🎯 TP1 wykonane w tle: ${pos.ticker} (${soldShares} szt.) w portfelu "${portfolio.name}"`);
+            console.log(`[AutoPilot Daemon] 🎯 TP1 wykonane w tle o ${dateStr}: ${pos.ticker} (${soldShares} szt.) w portfelu "${portfolio.name}"`);
 
             await this.sendTelegramAlertIfEnabled(userId, portfolio,
               `🤖 <b>Auto-Pilot 24/7 (Serwer w Tle)</b>: Realizacja TP1 (33% pozycji)\n` +
@@ -238,55 +284,74 @@ export class ServerAutoPilotDaemon {
               `🏛️ Walor: <b>${pos.ticker}</b>\n` +
               `💼 Portfel: <i>${portfolio.name}</i>\n` +
               `💵 Kurs egzekucji: <b>${pos.currentPrice.toFixed(2)} zł</b>\n` +
-              `📦 Sprzedano: <b>${soldShares} szt.</b> (Zwrócono: ${returnCash.toLocaleString('pl-PL')} PLN)\n` +
-              `📈 Zysk: <b>+${pnlPart.toFixed(2)} PLN (+${pos.pnlPercent.toFixed(2)}%)</b>\n` +
-              `🛡️ Stop Loss został automatycznie przestawiony na Break-Even (${pos.entryPrice.toFixed(2)} zł)!\n` +
-              `⏰ <b>Godzina transakcji:</b> <code>${executionTimeStr}</code> (${executionDateStr})\n` +
-              `📡 <i>Transakcja zrealizowana automatycznie przez serwer (okno przeglądarki wyłączone)</i>`
+              `📦 Sprzedano: <b>${soldShares} szt.</b> (Pozostało: ${pos.shares} szt.)\n` +
+              `📈 Zysk: <b>${pnlPart >= 0 ? '+' : ''}${pnlPart.toFixed(2)} PLN (${pos.pnlPercent >= 0 ? '+' : ''}${pos.pnlPercent.toFixed(2)}%)</b>\n` +
+              `🛡️ Stop Loss przestawiony na Break-Even (${pos.entryPrice.toFixed(2)} zł)\n` +
+              `📅 <b>Data i godzina transakcji:</b> <code>${dateStr}</code>\n` +
+              `📡 <i>Zlecenie wykonane w tle na serwerze (Warszawa CET/CEST)</i>`
             );
+
+            if (pos.shares <= 0) {
+              continue;
+            }
           }
 
-          // 2. Osiągnięcie TP2 (kolejne 33% wolumenu)
+          // 2. Osiągnięcie TP2 (kolejne 33% pozostałego wolumenu lub ~33% początkowej pozycji)
           const hitTp2 = isShort
             ? (pos.tp1Reached && !pos.tp2Reached && pos.currentPrice <= pos.targetPrice2)
             : (pos.tp1Reached && !pos.tp2Reached && pos.currentPrice >= pos.targetPrice2);
 
-          if (hitTp2) {
+          if (hitTp2 && pos.shares > 0) {
             pos.tp2Reached = true;
             pos.status = 'ZREALIZOWANO TP2';
 
-            const soldShares = Math.max(1, Math.floor(pos.shares * 0.33));
-            const returnCash = Number((soldShares * pos.currentPrice).toFixed(2));
-            const pnlPart = isShort
-              ? Number(((pos.entryPrice - pos.currentPrice) * soldShares).toFixed(2))
-              : Number(((pos.currentPrice - pos.entryPrice) * soldShares).toFixed(2));
+            const soldShares = Math.min(pos.shares, Math.max(1, Math.floor(pos.shares * 0.50)));
+            pos.shares = Math.max(0, pos.shares - soldShares);
+            pos.pnlPln = calcPnlPln(pos.shares);
 
-            portfolio.cashPln = Number((portfolio.cashPln + returnCash).toFixed(2));
-            portfolio.allocatedPln = Math.max(0, Number((portfolio.allocatedPln - (soldShares * pos.entryPrice)).toFixed(2)));
-            portfolio.currentBalance = Number((portfolio.cashPln + portfolio.allocatedPln).toFixed(2));
-            portfolio.totalProfitPln = Number((portfolio.totalProfitPln + pnlPart).toFixed(2));
+            const returnCash = Number((soldShares * pos.currentPrice).toFixed(2));
+            const pnlPart = calcPnlPln(soldShares);
+            portfolio.cashPln = Number(((portfolio.cashPln || 0) + returnCash).toFixed(2));
 
             const tradeLog = {
-              id: `tr_srv_${Date.now()}_tp2`,
+              id: nextId('tr_srv_tp2', pos.ticker),
               date: dateStr,
               ticker: pos.ticker,
               name: pos.name,
-              type: isShort ? 'KUPNO' : 'SPRZEDAŻ',
+              type: isShort ? 'ZAMKNIĘCIE_SHORT' : 'SPRZEDAŻ',
+              positionSide: pos.positionSide || 'LONG',
               pricePln: pos.currentPrice,
               shares: soldShares,
               totalPln: returnCash,
               resultPln: pnlPart,
               resultPercent: pos.pnlPercent,
               strategyId: portfolio.id,
-              reason: `Serwer 24/7 Auto-Pilot: Osiągnięto poziom TP2. Realizacja kolejnych 33% pozycji z zyskiem.`,
+              reason: `Serwer 24/7 Auto-Pilot: Osiągnięto poziom TP2. Realizacja kolejnej partii pozycji z zyskiem.`,
               status: 'AUTO-PILOT'
             };
 
             await dbSaveTrade(userId, tradeLog);
+            await dbSaveNotification(userId, {
+              id: nextId('notif_srv_tp2', pos.ticker),
+              type: 'SELL_TP',
+              title: '🤖 Serwer 24/7: Realizacja TP2 (33%)',
+              message: `Zrealizowano kolejną partię ${pos.ticker} (${soldShares} szt.) po ${pos.currentPrice.toFixed(2)} zł!`,
+              ticker: pos.ticker,
+              portfolioName: portfolio.name,
+              portfolioId: portfolio.id,
+              shares: soldShares,
+              pricePln: pos.currentPrice,
+              totalPln: returnCash,
+              resultPln: pnlPart,
+              timestamp: dateStr,
+              executedAtIso: now.toISOString(),
+              source: 'SERVER_DAEMON',
+              read: false
+            });
+
             portfolioChanged = true;
             totalOrdersExecuted++;
-
-            console.log(`[AutoPilot Daemon] 🎯 TP2 wykonane w tle: ${pos.ticker} w portfelu "${portfolio.name}"`);
+            console.log(`[AutoPilot Daemon] 🎯 TP2 wykonane w tle o ${dateStr}: ${pos.ticker} (${soldShares} szt.) w portfelu "${portfolio.name}"`);
 
             await this.sendTelegramAlertIfEnabled(userId, portfolio,
               `🤖 <b>Auto-Pilot 24/7 (Serwer w Tle)</b>: Realizacja TP2 (33% pozycji)\n` +
@@ -294,14 +359,18 @@ export class ServerAutoPilotDaemon {
               `🏛️ Walor: <b>${pos.ticker}</b>\n` +
               `💼 Portfel: <i>${portfolio.name}</i>\n` +
               `💵 Kurs egzekucji: <b>${pos.currentPrice.toFixed(2)} zł</b>\n` +
-              `📦 Sprzedano: <b>${soldShares} szt.</b>\n` +
-              `📈 Zysk: <b>+${pnlPart.toFixed(2)} PLN (+${pos.pnlPercent.toFixed(2)}%)</b>\n` +
-              `⏰ <b>Godzina transakcji:</b> <code>${executionTimeStr}</code> (${executionDateStr})\n` +
-              `📡 <i>Transakcja zrealizowana automatycznie przez serwer (okno przeglądarki wyłączone)</i>`
+              `📦 Sprzedano: <b>${soldShares} szt.</b> (Pozostało: ${pos.shares} szt.)\n` +
+              `📈 Zysk: <b>${pnlPart >= 0 ? '+' : ''}${pnlPart.toFixed(2)} PLN (${pos.pnlPercent >= 0 ? '+' : ''}${pos.pnlPercent.toFixed(2)}%)</b>\n` +
+              `📅 <b>Data i godzina transakcji:</b> <code>${dateStr}</code>\n` +
+              `📡 <i>Zlecenie wykonane w tle na serwerze (Warszawa CET/CEST)</i>`
             );
+
+            if (pos.shares <= 0) {
+              continue;
+            }
           }
 
-          // 3. Osiągnięcie TP3 lub STOP LOSS -> Pełne zamknięcie pozycji
+          // 3. Osiągnięcie TP3 lub STOP LOSS -> Pełne zamknięcie pozostałej pozycji
           const hitTp3 = isShort
             ? (pos.tp2Reached && !pos.tp3Reached && pos.currentPrice <= pos.targetPrice3)
             : (pos.tp2Reached && !pos.tp3Reached && pos.currentPrice >= pos.targetPrice3);
@@ -310,24 +379,20 @@ export class ServerAutoPilotDaemon {
             ? (pos.currentPrice >= pos.stopLoss)
             : (pos.currentPrice <= pos.stopLoss);
 
-          if (hitTp3 || hitSl) {
+          if ((hitTp3 || hitSl) && pos.shares > 0) {
             const remainingShares = pos.shares;
             const returnCash = Number((remainingShares * pos.currentPrice).toFixed(2));
-            const pnlPart = isShort
-              ? Number(((pos.entryPrice - pos.currentPrice) * remainingShares).toFixed(2))
-              : Number(((pos.currentPrice - pos.entryPrice) * remainingShares).toFixed(2));
+            const pnlPart = calcPnlPln(remainingShares);
 
-            portfolio.cashPln = Number((portfolio.cashPln + returnCash).toFixed(2));
-            portfolio.allocatedPln = Math.max(0, Number((portfolio.allocatedPln - (remainingShares * pos.entryPrice)).toFixed(2)));
-            portfolio.currentBalance = Number((portfolio.cashPln + portfolio.allocatedPln).toFixed(2));
-            portfolio.totalProfitPln = Number((portfolio.totalProfitPln + pnlPart).toFixed(2));
+            portfolio.cashPln = Number(((portfolio.cashPln || 0) + returnCash).toFixed(2));
 
             const tradeLog = {
-              id: `tr_srv_${Date.now()}_close`,
+              id: nextId(hitTp3 ? 'tr_srv_tp3' : 'tr_srv_sl', pos.ticker),
               date: dateStr,
               ticker: pos.ticker,
               name: pos.name,
-              type: isShort ? 'KUPNO' : 'SPRZEDAŻ',
+              type: isShort ? 'ZAMKNIĘCIE_SHORT' : 'SPRZEDAŻ',
+              positionSide: pos.positionSide || 'LONG',
               pricePln: pos.currentPrice,
               shares: remainingShares,
               totalPln: returnCash,
@@ -341,24 +406,42 @@ export class ServerAutoPilotDaemon {
             };
 
             await dbSaveTrade(userId, tradeLog);
+            await dbSaveNotification(userId, {
+              id: nextId(hitTp3 ? 'notif_srv_tp3' : 'notif_srv_sl', pos.ticker),
+              type: hitTp3 ? 'SELL_TP' : 'SELL_SL',
+              title: hitTp3 ? '🤖 Serwer 24/7: Pełna realizacja TP3' : '🤖 Serwer 24/7: Aktywacja Stop Loss',
+              message: hitTp3
+                ? `Pozycja ${pos.ticker} (${remainingShares} szt.) zamknięta z zyskiem po ${pos.currentPrice.toFixed(2)} zł.`
+                : `Pozycja ${pos.ticker} (${remainingShares} szt.) zamknięta na Stop Loss (${pos.stopLoss.toFixed(2)} zł).`,
+              ticker: pos.ticker,
+              portfolioName: portfolio.name,
+              portfolioId: portfolio.id,
+              shares: remainingShares,
+              pricePln: pos.currentPrice,
+              totalPln: returnCash,
+              resultPln: pnlPart,
+              timestamp: dateStr,
+              executedAtIso: now.toISOString(),
+              source: 'SERVER_DAEMON',
+              read: false
+            });
+
             portfolioChanged = true;
             totalOrdersExecuted++;
-
-            console.log(`[AutoPilot Daemon] ${hitTp3 ? '🏆 TP3' : '🛡️ SL'} wykonane w tle: ${pos.ticker} w portfelu "${portfolio.name}"`);
+            console.log(`[AutoPilot Daemon] ${hitTp3 ? '🏆 TP3' : '🛡️ SL'} wykonane w tle o ${dateStr}: ${pos.ticker} (${remainingShares} szt.) w "${portfolio.name}"`);
 
             await this.sendTelegramAlertIfEnabled(userId, portfolio,
-              `🤖 <b>Auto-Pilot 24/7 (Serwer w Tle)</b>: ${hitTp3 ? '🏆 Pełna Realizacja TP3 (+11.8%)' : '🛡️ Aktywacja Stop Loss'}\n` +
+              `🤖 <b>Auto-Pilot 24/7 (Serwer w Tle)</b>: ${hitTp3 ? '🏆 Pełna Realizacja TP3' : '🛡️ Aktywacja Stop Loss'}\n` +
               `━━━━━━━━━━━━━━━━━━━━\n` +
               `🏛️ Walor: <b>${pos.ticker}</b>\n` +
               `💼 Portfel: <i>${portfolio.name}</i>\n` +
               `💵 Kurs zamknięcia: <b>${pos.currentPrice.toFixed(2)} zł</b>\n` +
               `📦 Zamknięto: <b>${remainingShares} szt.</b> (Zwrócono: ${returnCash.toLocaleString('pl-PL')} PLN)\n` +
               `📊 Wynik transakcji: <b>${pnlPart >= 0 ? '+' : ''}${pnlPart.toFixed(2)} PLN (${pos.pnlPercent >= 0 ? '+' : ''}${pos.pnlPercent.toFixed(2)}%)</b>\n` +
-              `⏰ <b>Godzina transakcji:</b> <code>${executionTimeStr}</code> (${executionDateStr})\n` +
-              `📡 <i>Transakcja zrealizowana automatycznie przez serwer (okno przeglądarki wyłączone)</i>`
+              `📅 <b>Data i godzina transakcji:</b> <code>${dateStr}</code>\n` +
+              `📡 <i>Zlecenie wykonane w tle na serwerze (Warszawa CET/CEST)</i>`
             );
 
-            // Pozycja została w całości zamknięta – nie dodajemy jej do remainingPositions
             continue;
           }
 
@@ -366,6 +449,9 @@ export class ServerAutoPilotDaemon {
         }
 
         portfolio.activePositions = remainingPositions;
+
+        // Przelicz wycenę portfela po kroku 1 przed oceną Drawdown / Nowych zakupów
+        this.recomputePortfolioMetrics(portfolio);
 
         // ---------------------------------------------------------------------
         // KROK 2: Wyszukiwanie nowych okazji rynkowych (Kupno Auto-Pilota)
@@ -377,161 +463,199 @@ export class ServerAutoPilotDaemon {
 
         if (currentDd > maxDdCap) {
           const maxPos = portfolio.autoPilotMaxPositions || 5;
-          const minConf = portfolio.autoPilotMinConfidence || 75;
+          const minConf = portfolio.autoPilotMinConfidence || 76;
 
           if (portfolio.activePositions.length < maxPos) {
-            for (const stock of quotes) {
+            // Sortuj kandydatów od najwyższego trendScore, żeby wybierać najsilniejsze walory
+            const sortedQuotes = [...quotes].sort((a, b) => (b.trendScore || 0) - (a.trendScore || 0));
+
+            for (const stock of sortedQuotes) {
               if (portfolio.activePositions.length >= maxPos) break;
 
-              // Weryfikacja czy rynek waloru jest otwarty (lub czy włączono test)
-              const marketCheck = MarketSessionService.isMarketOpenForStock(stock.symbol, now, this.forceSessionOpenTest);
+              const marketCheck = MarketSessionService.isMarketOpenForStock(
+                { symbol: stock.symbol, market: stock.market },
+                now,
+                this.forceSessionOpenTest
+              );
               if (!marketCheck.isOpen) continue;
 
-              // Sprawdź czy portfel dopuszcza ten rynek
               const isAllowed = this.isMarketAllowedForPortfolio(portfolio, stock);
               if (!isAllowed) continue;
 
-              // Sprawdź czy nie posiadamy już otwartej pozycji w tym walorze
               const alreadyHolds = portfolio.activePositions.some(
-                (p: any) => norm(p.ticker) === norm(stock.symbol)
+                (p: any) => normTicker(p.ticker) === normTicker(stock.symbol)
               );
               if (alreadyHolds) continue;
 
-              // Warunek mocnego sygnału Auto-Pilota:
-              const isOpportunity = (stock.trendScore && stock.trendScore >= minConf) ||
-                                    (stock.analystRecommendation?.includes('KUPUJ') && stock.changePercent > 0.3) ||
-                                    (stock.changePercent > 0.4);
+              const isStrongBuy =
+                stock.trendScore >= minConf ||
+                (stock.analystRecommendation?.includes('KUPUJ') && stock.changePercent > 0.3) ||
+                (stock.rsi14 < 65 && stock.macdHist > 0 && stock.changePercent > 0.5);
 
-              if (isOpportunity && stock.price > 0) {
-                // Alokacja gotówki
-                const allocPct = (portfolio.autoPilotAllocationPercent || 10) / 100;
-                const buyBudget = Math.max(1000, portfolio.cashPln * allocPct);
-                if (portfolio.cashPln >= buyBudget && buyBudget >= stock.price) {
-                  const shares = Math.max(1, Math.floor(buyBudget / stock.price));
-                  const totalPln = Number((shares * stock.price).toFixed(2));
+              if (!isStrongBuy || stock.price <= 0) continue;
 
-                  portfolio.cashPln = Math.max(0, Number((portfolio.cashPln - totalPln).toFixed(2)));
-                  portfolio.allocatedPln = Number((portfolio.allocatedPln + totalPln).toFixed(2));
-                  portfolio.currentBalance = Number((portfolio.cashPln + portfolio.allocatedPln).toFixed(2));
-                  portfolio.tradesCount = (portfolio.tradesCount || 0) + 1;
+              const allocPct = (portfolio.autoPilotAllocationPercent || 15) / 100;
+              const buyBudget = Math.max(1000, portfolio.currentBalance * allocPct);
+              if (portfolio.cashPln < buyBudget || buyBudget < stock.price) continue;
 
-                  const atrMultiplier = stock.isCommodity ? 0.045 : 0.038;
-                  const sl = Number((stock.price * (1 - atrMultiplier)).toFixed(2));
-                  const tp1 = Number((stock.price * 1.032).toFixed(2));
-                  const tp2 = Number((stock.price * 1.065).toFixed(2));
-                  const tp3 = Number((stock.price * 1.118).toFixed(2));
+              const shares = Math.max(1, Math.floor(buyBudget / stock.price));
+              const totalPln = Number((shares * stock.price).toFixed(2));
+              if (portfolio.cashPln < totalPln) continue;
 
-                  const executionTimeStr = now.toLocaleTimeString('pl-PL', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-                  const executionDateStr = now.toLocaleDateString('pl-PL');
-                  const dateStr = `${executionDateStr}, ${executionTimeStr}`;
+              portfolio.cashPln = Math.max(0, Number((portfolio.cashPln - totalPln).toFixed(2)));
+              portfolio.tradesCount = (portfolio.tradesCount || 0) + 1;
 
-                  const newPosition = {
-                    id: `pos_srv_${Date.now()}`,
-                    ticker: stock.symbol,
-                    name: stock.symbol,
-                    shares,
-                    entryPrice: stock.price,
-                    currentPrice: stock.price,
-                    targetPrice1: tp1,
-                    targetPrice2: tp2,
-                    targetPrice3: tp3,
-                    tp1Reached: false,
-                    tp2Reached: false,
-                    tp3Reached: false,
-                    stopLoss: sl,
-                    positionSide: 'LONG',
-                    status: 'AKTYWNA',
-                    pnlPln: 0,
-                    pnlPercent: 0,
-                    entryDate: now.toISOString().split('T')[0]
-                  };
+              const atrMultiplier = stock.isCommodity ? 0.045 : 0.038;
+              const sl = Number((stock.price * (1 - atrMultiplier)).toFixed(2));
+              const tp1 = Number((stock.price * 1.032).toFixed(2));
+              const tp2 = Number((stock.price * 1.065).toFixed(2));
+              const tp3 = Number((stock.price * 1.118).toFixed(2));
 
-                  portfolio.activePositions.unshift(newPosition);
+              const newPosition = {
+                id: nextId('pos_srv', stock.symbol),
+                ticker: stock.symbol,
+                name: stock.name || stock.symbol,
+                shares,
+                entryPrice: stock.price,
+                currentPrice: stock.price,
+                targetPrice1: tp1,
+                targetPrice2: tp2,
+                targetPrice3: tp3,
+                tp1Reached: false,
+                tp2Reached: false,
+                tp3Reached: false,
+                stopLoss: sl,
+                positionSide: 'LONG',
+                status: 'AKTYWNA',
+                pnlPln: 0,
+                pnlPercent: 0,
+                entryDate: isoDateStr
+              };
 
-                  // Dziennik audytowy Auto-Pilota
-                  if (!portfolio.autoPilotLogs) portfolio.autoPilotLogs = [];
-                  portfolio.autoPilotLogs.unshift({
-                    id: `log_${Date.now()}`,
-                    timestamp: executionTimeStr,
-                    ticker: stock.symbol,
-                    action: 'KUPNO_LONG',
-                    confidence: stock.trendScore || 80,
-                    riskRewardRatio: 2.8,
-                    reason: `Autonomiczne wejście na serwerze: Konsensus ${stock.trendScore || 80}% >= ${minConf}%`,
-                    portfolioId: portfolio.id,
-                    portfolioName: portfolio.name
-                  });
+              portfolio.activePositions.unshift(newPosition);
 
-                  // Zapis do Dziennika Tradera
-                  const tradeLog = {
-                    id: `tr_srv_${Date.now()}_buy`,
-                    date: dateStr,
-                    ticker: stock.symbol,
-                    name: stock.symbol,
-                    type: 'KUPNO',
-                    pricePln: stock.price,
-                    shares,
-                    totalPln,
-                    resultPln: 0,
-                    resultPercent: 0,
-                    strategyId: portfolio.id,
-                    reason: `Autonomiczny zakup serwerowy (Konsensus: ${stock.trendScore || 80}%). SL: ${sl} zł, TP3: ${tp3} zł`,
-                    status: 'AUTO-PILOT'
-                  };
+              if (!portfolio.autoPilotLogs) portfolio.autoPilotLogs = [];
+              portfolio.autoPilotLogs.unshift({
+                id: nextId('log_srv', stock.symbol),
+                timestamp: dateStr,
+                ticker: stock.symbol,
+                action: 'KUPNO_LONG',
+                confidence: stock.trendScore,
+                riskRewardRatio: 2.8,
+                reason: `Autonomiczne wejście na serwerze (${dateStr}): Konsensus ${stock.trendScore}% >= ${minConf}%`,
+                portfolioId: portfolio.id,
+                portfolioName: portfolio.name
+              });
+              portfolio.autoPilotLogs = portfolio.autoPilotLogs.slice(0, 100);
 
-                  await dbSaveTrade(userId, tradeLog);
-                  portfolioChanged = true;
-                  totalOrdersExecuted++;
+              const tradeLog = {
+                id: nextId('tr_srv_buy', stock.symbol),
+                date: dateStr,
+                ticker: stock.symbol,
+                name: stock.name || stock.symbol,
+                type: 'KUPNO',
+                positionSide: 'LONG',
+                pricePln: stock.price,
+                shares,
+                totalPln,
+                resultPln: 0,
+                resultPercent: 0,
+                strategyId: portfolio.id,
+                reason: `Serwer 24/7 Auto-Pilot: Autonomiczny zakup PKC/Market (Konsensus: ${stock.trendScore}%). SL: ${sl} zł, TP3: ${tp3} zł`,
+                status: 'AUTO-PILOT'
+              };
 
-                  console.log(`[AutoPilot Daemon] 🛒 Kupiono w tle: ${shares} szt. ${stock.symbol} po ${stock.price} zł w portfelu "${portfolio.name}" (User: ${userId})`);
+              await dbSaveTrade(userId, tradeLog);
+              await dbSaveNotification(userId, {
+                id: nextId('notif_srv_buy', stock.symbol),
+                type: 'BUY',
+                title: '🤖 Serwer 24/7: Automatyczne KUPNO',
+                message: `Auto-Pilot zakupił ${shares} szt. ${stock.symbol} po ${stock.price.toFixed(2)} zł (${totalPln.toLocaleString('pl-PL')} PLN) w "${portfolio.name}".`,
+                ticker: stock.symbol,
+                portfolioName: portfolio.name,
+                portfolioId: portfolio.id,
+                shares,
+                pricePln: stock.price,
+                totalPln,
+                timestamp: dateStr,
+                executedAtIso: now.toISOString(),
+                source: 'SERVER_DAEMON',
+                read: false
+              });
 
-                  await this.sendTelegramAlertIfEnabled(userId, portfolio,
-                    `🤖 <b>Auto-Pilot 24/7 (Serwer w Tle)</b>: Nowe Zlecenie KUPNA\n` +
-                    `━━━━━━━━━━━━━━━━━━━━\n` +
-                    `🏛️ Walor: <b>${stock.symbol}</b>\n` +
-                    `💼 Portfel: <i>${portfolio.name}</i>\n` +
-                    `📦 Pakiet: <b>${shares} szt.</b> po <b>${stock.price.toFixed(2)} zł</b> (${totalPln.toLocaleString('pl-PL')} PLN)\n` +
-                    `🛑 Stop Loss: <b>${sl.toFixed(2)} zł</b> | 🎯 Cel TP3: <b>${tp3.toFixed(2)} zł</b>\n` +
-                    `⏰ <b>Godzina transakcji:</b> <code>${executionTimeStr}</code> (${executionDateStr})\n` +
-                    `📡 <i>Zlecenie wykonane w tle przez serwer (okno przeglądarki wyłączone)</i>`
-                  );
-                }
-              }
+              portfolioChanged = true;
+              totalOrdersExecuted++;
+              console.log(`[AutoPilot Daemon] 🛒 Kupiono w tle o ${dateStr}: ${shares} szt. ${stock.symbol} po ${stock.price} zł w "${portfolio.name}" (User: ${userId})`);
+
+              await this.sendTelegramAlertIfEnabled(userId, portfolio,
+                `🤖 <b>Auto-Pilot 24/7 (Serwer w Tle)</b>: Nowe Zlecenie KUPNA\n` +
+                `━━━━━━━━━━━━━━━━━━━━\n` +
+                `🏛️ Walor: <b>${stock.symbol}</b> (${stock.name})\n` +
+                `💼 Portfel: <i>${portfolio.name}</i>\n` +
+                `📦 Pakiet: <b>${shares} szt.</b> po <b>${stock.price.toFixed(2)} zł</b> (${totalPln.toLocaleString('pl-PL')} PLN)\n` +
+                `🛑 Stop Loss: <b>${sl.toFixed(2)} zł</b> | 🎯 Cel TP3: <b>${tp3.toFixed(2)} zł</b>\n` +
+                `📅 <b>Data i godzina transakcji:</b> <code>${dateStr}</code>\n` +
+                `📡 <i>Zlecenie wykonane w tle przez serwer (okno przeglądarki może być zamknięte)</i>`
+              );
             }
           }
         }
 
         if (portfolioChanged) {
-          portfolio.updatedAt = new Date().toISOString();
+          this.recomputePortfolioMetrics(portfolio);
+          portfolio.updatedAt = now.toISOString();
           await dbSavePortfolio(userId, portfolio);
         }
       }
 
       this.lastExecutionSummary = totalOrdersExecuted > 0
-        ? `Zrealizowano ${totalOrdersExecuted} zleceń w tle o ${now.toLocaleTimeString('pl-PL')}`
-        : `Monitorowano ${userPortfolios.length} portfeli o ${now.toLocaleTimeString('pl-PL')} (kursy aktywne)`;
+        ? `Zrealizowano ${totalOrdersExecuted} zleceń w tle o ${timeStr} (${formatWarsawDateTime(now)})`
+        : `Monitorowano ${userPortfolios.length} portfeli o ${timeStr} (kursy aktywne)`;
 
     } catch (err: any) {
       console.error('[AutoPilot Daemon] Błąd pętli egzekucyjnej:', err.message);
       this.lastExecutionSummary = `Błąd pętli: ${err.message}`;
+    } finally {
+      this.isCycleExecuting = false;
+    }
+  }
+
+  private static recomputePortfolioMetrics(portfolio: any): void {
+    const positions = portfolio.activePositions || [];
+    const openVal = positions.reduce((sum: number, pos: any) => {
+      const shares = Number(pos.shares) || 0;
+      const cur = Number(pos.currentPrice) || Number(pos.entryPrice) || 0;
+      const entry = Number(pos.entryPrice) || cur;
+      if (pos.positionSide === 'SHORT') {
+        const marginAndPnl = entry * shares + (entry - cur) * shares;
+        return sum + Math.max(0, marginAndPnl);
+      }
+      return sum + (shares * cur);
+    }, 0);
+
+    portfolio.allocatedPln = Number(openVal.toFixed(2));
+    portfolio.currentBalance = Number(((Number(portfolio.cashPln) || 0) + portfolio.allocatedPln).toFixed(2));
+    const initCap = Number(portfolio.initialCapital) || 0;
+    if (initCap > 0) {
+      portfolio.totalProfitPln = Number((portfolio.currentBalance - initCap).toFixed(2));
+      portfolio.totalProfitPercent = Number(((portfolio.totalProfitPln / initCap) * 100).toFixed(2));
     }
   }
 
   private static isMarketAllowedForPortfolio(portfolio: any, stock: MarketQuote): boolean {
-    const isCommodity = stock.isCommodity || ['XAU', 'XAG', 'CB', 'CL', 'NG', 'COPPER', 'XPT', 'ZW'].some(c => stock.symbol.includes(c));
-    const isFw20 = stock.symbol.includes('FW20');
+    const isCommodity = stock.isCommodity || stock.market === 'Surowce';
+    const isFw20 = stock.market === 'FW20' || stock.symbol.includes('FW20') || stock.symbol.includes('WIG20');
+    const isNc = stock.market === 'NewConnect';
 
-    if (portfolio.allowedMarkets && Array.isArray(portfolio.allowedMarkets)) {
+    if (portfolio.allowedMarkets && Array.isArray(portfolio.allowedMarkets) && portfolio.allowedMarkets.length > 0) {
       if (isCommodity && !portfolio.allowedMarkets.includes('Surowce')) return false;
       if (isFw20 && !portfolio.allowedMarkets.includes('FW20')) return false;
-      if (!isCommodity && !isFw20 && !portfolio.allowedMarkets.includes('GPW')) return false;
+      if (isNc && !portfolio.allowedMarkets.includes('NewConnect')) return false;
+      if (!isCommodity && !isFw20 && !isNc && !portfolio.allowedMarkets.includes('GPW')) return false;
     }
     return true;
   }
 
-  /**
-   * Wysyła powiadomienie Telegram jeśli portfel i ustawienia użytkownika mają skonfigurowanego bota
-   */
   private static async sendTelegramAlertIfEnabled(userId: string, portfolio: any, message: string): Promise<void> {
     if (!portfolio.telegramEnabled) return;
     try {
@@ -539,11 +663,12 @@ export class ServerAutoPilotDaemon {
       const botToken = settings?.bot_token || settings?.botToken || process.env.TELEGRAM_BOT_TOKEN;
       const chatId = settings?.chat_id || settings?.chatId || process.env.TELEGRAM_CHAT_ID;
 
-      if (!botToken || !chatId) {
-        return;
-      }
+      if (!botToken || !chatId) return;
 
-      const postData = JSON.stringify({ chat_id: chatId, text: message, parse_mode: 'HTML' });
+      const sentAt = formatWarsawDateTime();
+      const fullMessage = `${message}\n📤 <i>Wysłano alert: ${sentAt}</i>`;
+
+      const postData = JSON.stringify({ chat_id: chatId, text: fullMessage, parse_mode: 'HTML' });
       const req = https.request({
         hostname: 'api.telegram.org',
         port: 443,
@@ -566,6 +691,7 @@ export class ServerAutoPilotDaemon {
 
   /**
    * Pobiera aktualne notowania z wewnętrznego endpointu HTTP /api/market-quotes
+   * i wzbogaca je o pełne wskaźniki z INITIAL_STOCKS + identyczną funkcję enrichStockSignalsPure jak w przeglądarce.
    */
   private static async fetchLiveQuotes(extraSymbols: string[] = []): Promise<MarketQuote[]> {
     return new Promise((resolve) => {
@@ -578,8 +704,8 @@ export class ServerAutoPilotDaemon {
         port: parseInt(port, 10),
         path: `/api/market-quotes?symbols=${encodeURIComponent(symbolQuery)}`,
         method: 'GET',
-        headers: { 'User-Agent': 'StockSignalPl-Daemon/2.4' },
-        timeout: 5000
+        headers: { 'User-Agent': 'StockSignalPl-Daemon/2.4.5' },
+        timeout: 8000
       }, (res) => {
         let body = '';
         res.on('data', chunk => body += chunk);
@@ -588,24 +714,75 @@ export class ServerAutoPilotDaemon {
             const data = JSON.parse(body);
             if (data.success && Array.isArray(data.quotes)) {
               const quotes: MarketQuote[] = data.quotes.map((q: any) => {
-                const isCommodity = Boolean(q.isCommodity || ['XAU', 'XAG', 'CB', 'CL', 'NG', 'COPPER', 'XPT', 'ZW'].some(c => q.symbol.includes(c)));
-                let score = 70;
-                if (q.changePercent > 1.2) score = 86;
-                else if (q.changePercent > 0.4) score = 80;
-                else if (q.changePercent > 0) score = 75;
-                else if (q.changePercent < -1.5) score = 42;
-                else if (q.changePercent < -0.5) score = 55;
-                else score = 68;
+                const nq = normTicker(q.symbol);
+                const base = INITIAL_STOCKS.find(
+                  s => normTicker(s.symbol) === nq || normTicker(s.cleanSymbol) === nq ||
+                       ((nq === 'WIG20' || nq === 'FW20' || nq === 'FW2020') && (normTicker(s.cleanSymbol) === 'FW20' || normTicker(s.cleanSymbol) === 'FW2020'))
+                );
+
+                const isCommodity = Boolean(
+                  q.isCommodity ||
+                  base?.market === 'Surowce' ||
+                  ['XAU', 'XAG', 'CB', 'BRENT', 'CL', 'WTI', 'NG', 'HG', 'COPPER', 'XPT', 'ZW'].includes(nq)
+                );
+
+                const mergedStock: StockQuote = base
+                  ? {
+                      ...base,
+                      price: Number(q.price),
+                      previousClose: Number(q.previousClose || base.previousClose),
+                      open: Number(q.open || base.open),
+                      high: Number(Math.max(base.high, q.high || q.price)),
+                      low: Number(Math.min(base.low, q.low || q.price)),
+                      change: Number(q.change ?? (q.price - base.previousClose)),
+                      changePercent: Number(q.changePercent ?? 0),
+                      volume: Number(q.volume || base.volume)
+                    }
+                  : {
+                      symbol: q.symbol,
+                      cleanSymbol: nq,
+                      name: q.symbol,
+                      market: isCommodity ? 'Surowce' : nq.includes('FW20') ? 'FW20' : 'WIG20',
+                      sector: isCommodity ? 'Surowce' : 'GPW',
+                      price: Number(q.price),
+                      open: Number(q.open || q.price),
+                      high: Number(q.high || q.price),
+                      low: Number(q.low || q.price),
+                      previousClose: Number(q.previousClose || q.price),
+                      change: Number(q.change || 0),
+                      changePercent: Number(q.changePercent || 0),
+                      volume: Number(q.volume || 10000),
+                      turnoverPln: Math.round(Number(q.price) * Number(q.volume || 10000)),
+                      peRatio: 12.0,
+                      pbvRatio: 1.4,
+                      dividendYield: 2.5,
+                      marketCapMlnPln: 5000,
+                      rsi14: q.changePercent > 0 ? 58 : 46,
+                      macd: { value: 0.4, signal: 0.2, hist: q.changePercent >= 0 ? 0.2 : -0.2 },
+                      sma50: Number((Number(q.price) * 0.97).toFixed(2)),
+                      sma200: Number((Number(q.price) * 0.93).toFixed(2)),
+                      candlestickPattern: 'Świeca Sesyjna',
+                      sparkline: [Number(q.price)],
+                      history: []
+                    };
+
+                const enriched = enrichStockSignalsPure(mergedStock);
 
                 return {
-                  symbol: q.symbol,
-                  price: q.price,
-                  change: q.change,
-                  changePercent: q.changePercent,
-                  trendScore: score,
+                  symbol: base?.symbol || q.symbol,
+                  name: enriched.name,
+                  price: enriched.price,
+                  change: enriched.change,
+                  changePercent: enriched.changePercent,
+                  trendScore: enriched.trendScore ?? 65,
+                  rsi14: enriched.rsi14,
+                  macdHist: enriched.macd?.hist ?? 0,
+                  analystRecommendation: enriched.analystRecommendation,
+                  market: enriched.market,
                   isCommodity
                 };
               });
+
               quotes.forEach(q => this.cachedQuotes.set(q.symbol, q));
               return resolve(quotes);
             }
@@ -624,4 +801,3 @@ export class ServerAutoPilotDaemon {
     });
   }
 }
-

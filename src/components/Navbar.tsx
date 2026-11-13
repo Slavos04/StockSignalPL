@@ -1,5 +1,5 @@
 import React from 'react';
-import { UserAccount, FearGreedData, StockQuote, PortfolioStrategy, PositionItem } from '../types/stock';
+import { UserAccount, FearGreedData, StockQuote, PortfolioStrategy, PositionItem, AutoPilotNotification } from '../types/stock';
 import { MarketSessionInfo } from '../services/marketSessionService';
 import { SettingsService } from '../services/settingsService';
 import {
@@ -12,6 +12,8 @@ import {
   Layers,
   Sliders,
   Bell,
+  CheckCheck,
+  Bot,
   RefreshCw,
   Info,
   Settings,
@@ -42,6 +44,8 @@ interface NavbarProps {
   stocks?: StockQuote[];
   portfolios?: PortfolioStrategy[];
   onSelectTicker?: (symbol: string) => void;
+  notifications?: AutoPilotNotification[];
+  onMarkNotificationsRead?: (ids?: string[]) => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -59,10 +63,14 @@ export const Navbar: React.FC<NavbarProps> = ({
   marketSessionInfo,
   stocks = [],
   portfolios = [],
-  onSelectTicker
+  onSelectTicker,
+  notifications = [],
+  onMarkNotificationsRead
 }) => {
   const [userMenuOpen, setUserMenuOpen] = React.useState(false);
+  const [notifMenuOpen, setNotifMenuOpen] = React.useState(false);
   const [isOptimismModalOpen, setIsOptimismModalOpen] = React.useState(false);
+  const unreadCount = React.useMemo(() => notifications.filter(n => !n.read).length, [notifications]);
 
   const getFearColor = (score: number) => {
     if (score >= 75) return 'text-emerald-400 bg-emerald-950/60 border-emerald-500/40 hover:bg-emerald-900/60';
@@ -298,7 +306,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                     <span className="text-emerald-400">PL</span>
                   </span>
                   <span className="px-1.5 py-0.5 text-[10px] font-bold bg-emerald-950/80 text-emerald-300 border border-emerald-500/40 rounded shadow-sm shadow-emerald-950/40">
-                    v2.4.4
+                    v2.4.5
                   </span>
                 </div>
                 <p className="text-[11px] text-slate-400 tracking-wider">Silnik Sygnałów Giełdowych GPW, WIG20 & Surowce</p>
@@ -379,12 +387,120 @@ export const Navbar: React.FC<NavbarProps> = ({
             </button>
           </nav>
 
-          {/* User profile & actions with "i" and "gear" buttons */}
+          {/* User profile & actions with Bell notifications, "i" and "gear" buttons */}
           <div className="flex items-center gap-2">
+            {/* Notification Center (Bell) */}
+            <div className="relative">
+              <button
+                onClick={() => {
+                  setNotifMenuOpen(!notifMenuOpen);
+                  setUserMenuOpen(false);
+                }}
+                title="Centrum Powiadomień Auto-Pilota 24/7 — historia transakcji wykonanych w tle z dokładnym czasem"
+                className="relative p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 transition-colors cursor-pointer"
+              >
+                <Bell className={`w-4 h-4 ${unreadCount > 0 ? 'text-amber-400 animate-pulse' : 'text-slate-300'}`} />
+                {unreadCount > 0 && (
+                  <span className="absolute -top-1 -right-1 min-w-[17px] h-[17px] px-1 rounded-full bg-rose-600 text-white text-[10px] font-black flex items-center justify-center border border-slate-950 shadow">
+                    {unreadCount > 99 ? '99+' : unreadCount}
+                  </span>
+                )}
+              </button>
+
+              {notifMenuOpen && (
+                <div className="absolute right-0 mt-2 w-80 sm:w-96 rounded-2xl bg-slate-900 border border-slate-700 shadow-2xl z-50 text-slate-200 overflow-hidden">
+                  <div className="px-4 py-3 border-b border-slate-800 bg-slate-950/80 flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <Bot className="w-4 h-4 text-cyan-400" />
+                      <div>
+                        <p className="text-xs font-bold text-white">Powiadomienia Auto-Pilota 24/7</p>
+                        <p className="text-[10px] text-slate-400">Czas transakcji na serwerze (Warszawa)</p>
+                      </div>
+                    </div>
+                    {unreadCount > 0 && onMarkNotificationsRead && (
+                      <button
+                        onClick={() => onMarkNotificationsRead()}
+                        className="px-2 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-[10px] font-bold text-emerald-300 flex items-center gap-1 cursor-pointer"
+                      >
+                        <CheckCheck className="w-3 h-3" />
+                        <span>Przeczytane</span>
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="max-h-96 overflow-y-auto divide-y divide-slate-800/80">
+                    {notifications.length === 0 ? (
+                      <div className="p-6 text-center text-xs text-slate-500">
+                        Brak powiadomień o transakcjach w tle. Gdy silnik serwerowy 24/7 otworzy lub zamknie pozycję, pojawi się tutaj z dokładną datą transakcji.
+                      </div>
+                    ) : (
+                      notifications.slice(0, 30).map((n) => {
+                        const isBuy = n.type === 'BUY';
+                        const isTp = n.type === 'SELL_TP';
+                        return (
+                          <div
+                            key={n.id}
+                            onClick={() => {
+                              if (!n.read && onMarkNotificationsRead) onMarkNotificationsRead([n.id]);
+                            }}
+                            className={`p-3 text-xs transition-colors cursor-pointer ${
+                              n.read ? 'bg-slate-900/40 hover:bg-slate-800/40' : 'bg-slate-800/70 hover:bg-slate-800'
+                            }`}
+                          >
+                            <div className="flex items-center justify-between gap-2 mb-1">
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                {!n.read && <span className="w-2 h-2 rounded-full bg-amber-400 shrink-0" />}
+                                <span className="font-bold text-white">{n.title}</span>
+                                <span
+                                  className={`px-1.5 py-0.5 rounded text-[9px] font-bold border ${
+                                    isBuy
+                                      ? 'bg-emerald-950 text-emerald-300 border-emerald-700'
+                                      : isTp
+                                      ? 'bg-sky-950 text-sky-300 border-sky-700'
+                                      : 'bg-rose-950 text-rose-300 border-rose-700'
+                                  }`}
+                                >
+                                  {isBuy ? 'KUPNO' : isTp ? 'TP' : 'SL'}
+                                </span>
+                                {n.source === 'SERVER_DAEMON' && (
+                                  <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-cyan-950 text-cyan-300 border border-cyan-700/60">
+                                    W TLE 24/7
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+
+                            <div className="text-[11px] text-emerald-300 font-mono mb-1">
+                              📅 Transakcja: {n.timestamp}
+                            </div>
+
+                            <div className="flex items-center justify-between text-[11px] text-slate-300 font-mono">
+                              <span className="font-sans text-slate-400 truncate max-w-[170px]">{n.portfolioName}</span>
+                              <span>
+                                <b className="text-white">{n.ticker}</b> • {n.shares} szt. @ {Number(n.pricePln).toFixed(2)} zł
+                              </span>
+                            </div>
+
+                            {n.resultPln !== undefined && (
+                              <div className="text-right text-[11px] font-mono mt-0.5">
+                                <span className={n.resultPln >= 0 ? 'text-emerald-400 font-bold' : 'text-rose-400 font-bold'}>
+                                  PnL: {n.resultPln >= 0 ? '+' : ''}{Number(n.resultPln).toLocaleString('pl-PL')} PLN
+                                </span>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+
             {/* Info Icon Button (i) */}
             <button
               onClick={onOpenInfoModal}
-              title="Informacje o programie StockSignalPL, numer wersji (v2.4.4) oraz pełny Changelog"
+              title="Informacje o programie StockSignalPL, numer wersji (v2.4.5) oraz pełny Changelog"
               className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 transition-colors cursor-pointer"
             >
               <Info className="w-4 h-4 text-sky-400" />
@@ -418,7 +534,10 @@ export const Navbar: React.FC<NavbarProps> = ({
             {currentUser && (
               <div className="relative">
                 <button
-                  onClick={() => setUserMenuOpen(!userMenuOpen)}
+                  onClick={() => {
+                    setUserMenuOpen(!userMenuOpen);
+                    setNotifMenuOpen(false);
+                  }}
                   title={`Zalogowany: ${currentUser.fullName || currentUser.username} (Rola: ${currentUser.role})`}
                   className="flex items-center gap-2.5 px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700/80 border border-slate-700 transition-colors cursor-pointer"
                 >

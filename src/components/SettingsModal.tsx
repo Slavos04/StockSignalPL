@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { AppSettings, AppTheme, TelegramSettings } from '../types/stock';
 import { TelegramService } from '../services/telegramService';
 import { Settings, X, Palette, Image, Send, Clock, CheckCircle2, RotateCcw, Upload, Link2 } from 'lucide-react';
@@ -35,6 +35,19 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [telegramStatus, setTelegramStatus] = useState<string | null>(null);
 
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (isOpen) {
+      setSelectedTheme(appSettings.theme);
+      setCustomBgInput(appSettings.customBgUrl || '');
+      setBgOpacity(appSettings.bgOpacity ?? 85);
+      setBgBlur(appSettings.bgBlur ?? 0);
+      setRefreshInterval(appSettings.refreshIntervalSec || 4);
+      setForceSessionTest(appSettings.forceSessionOpenTest || false);
+      setBotToken(telegramSettings.botToken || '');
+      setChatId(telegramSettings.chatId || '');
+    }
+  }, [isOpen, appSettings, telegramSettings]);
 
   if (!isOpen) return null;
 

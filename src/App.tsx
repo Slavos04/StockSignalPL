@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   UserAccount,
   StockQuote,
@@ -15,7 +15,9 @@ import { StooqService } from './services/stooqService';
 import { PortfolioService } from './services/portfolioService';
 import { TelegramService } from './services/telegramService';
 import { SettingsService } from './services/settingsService';
+import { AudioService } from './services/audioService';
 import { MarketSessionService, MarketSessionInfo } from './services/marketSessionService';
+import { formatWarsawTime } from './utils/dateTime';
 import { INITIAL_FEAR_GREED } from './data/initialData';
 
 import { Navbar } from './components/Navbar';
@@ -34,7 +36,8 @@ export default function App() {
   const [currentUser, setCurrentUser] = useState<UserAccount | null>(null);
   const [activeTab, setActiveTab] = useState<'portfolios' | 'audit' | 'consensus' | 'ranking' | 'admin'>('portfolios');
   const [autoPilotNotifications, setAutoPilotNotifications] = useState<AutoPilotNotification[]>([]);
-  
+  const [notificationHistory, setNotificationHistory] = useState<AutoPilotNotification[]>([]);
+
   // Data states
   const [stocks, setStocks] = useState<StockQuote[]>([]);
   const [sources, setSources] = useState<SignalSource[]>([]);
@@ -44,6 +47,12 @@ export default function App() {
   const [telegramSettings, setTelegramSettings] = useState<TelegramSettings>(TelegramService.getSettings());
   const [appSettings, setAppSettings] = useState<AppSettings>(SettingsService.getSettings());
   const [fearGreed, setFearGreed] = useState<FearGreedData>(INITIAL_FEAR_GREED);
+
+  // Refs for fresh closures inside background intervals
+  const currentUserRef = useRef<UserAccount | null>(null);
+  currentUserRef.current = currentUser;
+  const hasInitialServerSyncRef = useRef<boolean>(false);
+  const shownToastIdsRef = useRef<Set<string>>(new Set());
 
   // Custom analyst reports state managed across Admin & Audit
   const [customReports, setCustomReports] = useState<any[]>(() => {
@@ -64,6 +73,8 @@ export default function App() {
 
   // Active selected stock symbol
   const [selectedSymbol, setSelectedSymbol] = useState<string>('PKN.PL');
+  const selectedSymbolRef = useRef<string>(selectedSymbol);
+  selectedSymbolRef.current = selectedSymbol;
 
   // Modals state
   const [isPasswordModalOpen, setIsPasswordModalOpen] = useState(false);
@@ -71,10 +82,10 @@ export default function App() {
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
   const [isLiveUpdating, setIsLiveUpdating] = useState(false);
 
-  // Countdown timer for next Stooq quotes refresh
+  // Countdown timer for next quotes refresh
   const [secondsUntilRefresh, setSecondsUntilRefresh] = useState<number>(appSettings.refreshIntervalSec || 4);
 
-  // Initial load
+  // Initial local hydration
   useEffect(() => {
     AuthService.initialize();
     StooqService.initialize();
@@ -93,43 +104,63 @@ export default function App() {
     setUsers(AuthService.getUsers());
   }, []);
 
-  // Transparent server PostgreSQL fetch on login and background synchronization
-  useEffect(() => {
-    if (!currentUser?.id) return;
+  const syncWithServer = useCallback(async (userId: string) => {
+    if (!userId) return;
+    try {
+      const [serverPortfolios, serverTrades, serverNotifications] = await Promise.all([
+        PortfolioService.fetchPortfoliosFromServer(userId),
+        PortfolioService.fetchTradesFromServer(userId),
+        PortfolioService.fetchNotificationsFromServer(userId)
+      ]);
 
-    const syncWithServer = () => {
-      PortfolioService.fetchPortfoliosFromServer(currentUser.id).then((serverPortfolios) => {
-        if (serverPortfolios && serverPortfolios.length > 0) {
-          setPortfolios(serverPortfolios);
-        }
-      }).catch(() => {});
-
-      PortfolioService.fetchTradesFromServer(currentUser.id).then((serverTrades) => {
-        if (serverTrades && serverTrades.length > 0) {
-          setTrades(serverTrades);
-        }
-      }).catch(() => {});
-    };
-
-    // First fetch immediately on login
-    syncWithServer();
-
-    // Re-sync when user returns to the tab after closing/minimizing window
-    const handleVisibility = () => {
-      if (document.visibilityState === 'visible') {
-        syncWithServer();
+      if (serverPortfolios && serverPortfolios.length > 0) {
+        setPortfolios([...serverPortfolios]);
       }
-    };
-    document.addEventListener('visibilitychange', handleVisibility);
+      if (serverTrades) {
+        setTrades([...serverTrades]);
+      }
+      if (Array.isArray(serverNotifications)) {
+        setNotificationHistory(serverNotifications);
 
-    // Periodic background sync every 15 seconds to receive trades executed by server daemon
-    const syncTimer = setInterval(syncWithServer, 15000);
+        // Show unseen unread background notifications ONCE upon browser open / sync
+        const unseen = serverNotifications.filter(
+          n => !n.read && n.id && !shownToastIdsRef.current.has(n.id)
+        );
+        if (unseen.length > 0) {
+          const deliveredAt = formatWarsawTime();
+          unseen.forEach(n => shownToastIdsRef.current.add(n.id));
+          try {
+            localStorage.setItem(
+              `stocksignalpl_seen_toasts_${userId}`,
+              JSON.stringify(Array.from(shownToastIdsRef.current).slice(-250))
+            );
+          } catch {}
 
-    return () => {
-      document.removeEventListener('visibilitychange', handleVisibility);
-      clearInterval(syncTimer);
-    };
-  }, [currentUser?.id]);
+          const toastsWithDelivery = unseen.slice(0, 4).map(n => ({
+            ...n,
+            deliveredAt
+          }));
+          setAutoPilotNotifications(prev => [...toastsWithDelivery, ...prev].slice(0, 5));
+
+          const newest = unseen[0];
+          if (newest.type === 'BUY') AudioService.playBuyChime();
+          else if (newest.type === 'SELL_TP') AudioService.playTpChime();
+          else AudioService.playSlChime();
+        }
+      }
+      hasInitialServerSyncRef.current = true;
+    } catch {}
+  }, []);
+
+  const handleMarkNotificationsRead = useCallback(async (ids?: string[]) => {
+    const userId = currentUserRef.current?.id;
+    setNotificationHistory(prev =>
+      prev.map(n => (!ids || ids.includes(n.id) ? { ...n, read: true } : n))
+    );
+    if (userId) {
+      await PortfolioService.markNotificationsReadOnServer(userId, ids);
+    }
+  }, []);
 
   // GPW Warsaw Market Session status
   const [marketSession, setMarketSession] = useState<MarketSessionInfo>(() => {
@@ -145,11 +176,125 @@ export default function App() {
     return status;
   });
 
-  const triggerAutoPilotNotification = (notif: AutoPilotNotification) => {
-    setAutoPilotNotifications(prev => [notif, ...prev].slice(0, 5));
-  };
+  const handleAutoTick = useCallback(async () => {
+    setIsLiveUpdating(true);
+    try {
+      await StooqService.fetchRealMarketData();
+      const freshStocks = [...StooqService.getStocks()];
+      setStocks(freshStocks);
 
-  // Countdown and Auto-Refresh Timer - Aktywny podczas sesji GPW dla wszystkich walorów oraz 24/7 dla Surowców
+      const userId = currentUserRef.current?.id;
+      // Do NOT overwrite portfolios with stale localStorage before initial server sync finishes;
+      // and NEVER run competing client-side Auto-Pilot buys/sells (ServerAutoPilotDaemon runs 24/7 on server).
+      if (!userId || hasInitialServerSyncRef.current) {
+        PortfolioService.updateLiveMarketPricesOnly(freshStocks);
+        setPortfolios([...PortfolioService.getPortfolios()]);
+      }
+
+      if (userId && hasInitialServerSyncRef.current) {
+        await syncWithServer(userId);
+      }
+
+      const wig20Stock = freshStocks.find(
+        s =>
+          s.symbol.toUpperCase().includes('WIG20') ||
+          s.cleanSymbol.toUpperCase().includes('WIG20') ||
+          s.cleanSymbol.toUpperCase().includes('FW20')
+      );
+      const advancing = freshStocks.filter(s => s.changePercent > 0).length;
+      const declining = freshStocks.filter(s => s.changePercent < 0).length;
+      const total = advancing + declining || 1;
+      const realOptimism = Math.min(95, Math.max(15, Math.round((advancing / total) * 70 + 20)));
+
+      const getSentimentLabel = (val: number): 'Ekstremalny strach' | 'Strach' | 'Neutralnie' | 'Chciwość' | 'Ekstremalna chciwość' => {
+        if (val >= 75) return 'Ekstremalna chciwość';
+        if (val >= 55) return 'Chciwość';
+        if (val >= 45) return 'Neutralnie';
+        if (val >= 25) return 'Strach';
+        return 'Ekstremalny strach';
+      };
+
+      setFearGreed(prev => ({
+        ...prev,
+        wig20Value: wig20Stock ? wig20Stock.price : prev.wig20Value,
+        wig20Change: wig20Stock ? wig20Stock.changePercent : prev.wig20Change,
+        score: realOptimism,
+        label: getSentimentLabel(realOptimism),
+        updatedAt: formatWarsawTime()
+      }));
+    } finally {
+      setTimeout(() => setIsLiveUpdating(false), 500);
+    }
+  }, [syncWithServer]);
+
+  const handleAutoTickRef = useRef(handleAutoTick);
+  handleAutoTickRef.current = handleAutoTick;
+
+  // Transparent server fetch on login, visibility restore, and background synchronization
+  useEffect(() => {
+    if (!currentUser?.id) {
+      hasInitialServerSyncRef.current = false;
+      return;
+    }
+
+    hasInitialServerSyncRef.current = false;
+    try {
+      const savedSeen = localStorage.getItem(`stocksignalpl_seen_toasts_${currentUser.id}`);
+      shownToastIdsRef.current = savedSeen ? new Set(JSON.parse(savedSeen)) : new Set();
+    } catch {
+      shownToastIdsRef.current = new Set();
+    }
+
+    // Sync daemon test-session toggle from server so UI reflects 24/7 daemon mode
+    fetch('/api/admin/daemon-settings')
+      .then(r => r.json())
+      .then(data => {
+        if (data?.success && typeof data.forceSessionOpenTest === 'boolean') {
+          setAppSettings(prev => {
+            if (prev.forceSessionOpenTest === data.forceSessionOpenTest) return prev;
+            const next = { ...prev, forceSessionOpenTest: data.forceSessionOpenTest };
+            try {
+              localStorage.setItem('stocksignalpl_settings_v1_1', JSON.stringify(next));
+            } catch {}
+            return next;
+          });
+        }
+      })
+      .catch(() => {});
+
+    // First sync authoritative server portfolios/trades/notifications, then layer fresh market prices
+    syncWithServer(currentUser.id).then(() => {
+      handleAutoTickRef.current();
+    });
+
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible' && currentUserRef.current?.id) {
+        syncWithServer(currentUserRef.current.id);
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+
+    // Periodic background sync every 10 seconds to receive server daemon trades & notifications promptly
+    const syncTimer = setInterval(() => {
+      if (currentUserRef.current?.id) {
+        syncWithServer(currentUserRef.current.id);
+      }
+    }, 10000);
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibility);
+      clearInterval(syncTimer);
+    };
+  }, [currentUser?.id, syncWithServer]);
+
+  // Initial fetch for unauthenticated view only; logged-in flow waits for initial server sync
+  useEffect(() => {
+    if (!AuthService.getCurrentUser()?.id) {
+      handleAutoTickRef.current();
+    }
+  }, []);
+
+  // Countdown and Auto-Refresh Timer (Aktywny podczas sesji GPW dla wszystkich walorów oraz 24/7 dla Surowców)
   useEffect(() => {
     const timer = setInterval(() => {
       let currentStatus = MarketSessionService.getGpwStatus();
@@ -165,8 +310,7 @@ export default function App() {
 
       setSecondsUntilRefresh(prev => {
         if (prev <= 1) {
-          // Trigger tick refresh
-          handleAutoTick();
+          handleAutoTickRef.current();
           return appSettings.refreshIntervalSec || 4;
         }
         return prev - 1;
@@ -174,93 +318,59 @@ export default function App() {
     }, 1000);
 
     return () => clearInterval(timer);
-  }, [appSettings.refreshIntervalSec, appSettings.forceSessionOpenTest, selectedSymbol]);
-
-  // Initial fetch of real market data on startup
-  useEffect(() => {
-    handleAutoTick();
-  }, []);
-
-  const handleAutoTick = async () => {
-    setIsLiveUpdating(true);
-    await StooqService.fetchRealMarketData();
-    const freshStocks = [...StooqService.getStocks()];
-    setStocks(freshStocks);
-
-    // Automatyczna egzekucja Auto-Pilota: sprawdzanie TP/SL oraz zakupy silnych rekomendacji
-    PortfolioService.simulatePositionUpdate(freshStocks, triggerAutoPilotNotification);
-    PortfolioService.checkAndExecuteAutoPilotBuys(freshStocks, triggerAutoPilotNotification);
-
-    setPortfolios([...PortfolioService.getPortfolios()]);
-    setTrades([...PortfolioService.getTrades()]);
-
-    // Real sentiment & WIG20 calculation (zero random noise)
-    const wig20Stock = freshStocks.find(s => s.symbol.toUpperCase().includes('WIG20') || s.cleanSymbol.toUpperCase().includes('WIG20') || s.cleanSymbol.toUpperCase().includes('FW20'));
-    const advancing = freshStocks.filter(s => s.changePercent > 0).length;
-    const declining = freshStocks.filter(s => s.changePercent < 0).length;
-    const total = advancing + declining || 1;
-    const realOptimism = Math.min(95, Math.max(15, Math.round((advancing / total) * 70 + 20)));
-
-    const getSentimentLabel = (val: number): 'Ekstremalny strach' | 'Strach' | 'Neutralnie' | 'Chciwość' | 'Ekstremalna chciwość' => {
-      if (val >= 75) return 'Ekstremalna chciwość';
-      if (val >= 55) return 'Chciwość';
-      if (val >= 45) return 'Neutralnie';
-      if (val >= 25) return 'Strach';
-      return 'Ekstremalny strach';
-    };
-
-    setFearGreed(prev => ({
-      ...prev,
-      wig20Value: wig20Stock ? wig20Stock.price : prev.wig20Value,
-      wig20Change: wig20Stock ? wig20Stock.changePercent : prev.wig20Change,
-      score: realOptimism,
-      label: getSentimentLabel(realOptimism),
-      updatedAt: new Date().toLocaleTimeString('pl-PL')
-    }));
-
-    setTimeout(() => setIsLiveUpdating(false), 500);
-  };
+  }, [appSettings.refreshIntervalSec, appSettings.forceSessionOpenTest]);
 
   const handleManualRefresh = async () => {
     setIsLiveUpdating(true);
     setSecondsUntilRefresh(appSettings.refreshIntervalSec || 4);
-    if (selectedSymbol) {
-      await StooqService.fetchStooqQuote(selectedSymbol);
+    try {
+      if (selectedSymbolRef.current) {
+        await StooqService.fetchStooqQuote(selectedSymbolRef.current);
+      }
+      await StooqService.fetchRealMarketData();
+      const freshStocks = [...StooqService.getStocks()];
+      setStocks(freshStocks);
+
+      const userId = currentUserRef.current?.id;
+      if (userId) {
+        // Trigger server daemon evaluation cycle with fresh prices and pull latest trades/notifications
+        await fetch('/api/admin/daemon-run', { method: 'POST' }).catch(() => {});
+        await syncWithServer(userId);
+      }
+
+      PortfolioService.updateLiveMarketPricesOnly(freshStocks);
+      setPortfolios([...PortfolioService.getPortfolios()]);
+
+      const wig20Stock = freshStocks.find(
+        s =>
+          s.symbol.toUpperCase().includes('WIG20') ||
+          s.cleanSymbol.toUpperCase().includes('WIG20') ||
+          s.cleanSymbol.toUpperCase().includes('FW20')
+      );
+      const advancing = freshStocks.filter(s => s.changePercent > 0).length;
+      const declining = freshStocks.filter(s => s.changePercent < 0).length;
+      const total = advancing + declining || 1;
+      const realOptimism = Math.min(95, Math.max(15, Math.round((advancing / total) * 70 + 20)));
+
+      const getSentimentLabel = (val: number): 'Ekstremalny strach' | 'Strach' | 'Neutralnie' | 'Chciwość' | 'Ekstremalna chciwość' => {
+        if (val >= 75) return 'Ekstremalna chciwość';
+        if (val >= 55) return 'Chciwość';
+        if (val >= 45) return 'Neutralnie';
+        if (val >= 25) return 'Strach';
+        return 'Ekstremalny strach';
+      };
+
+      setFearGreed(prev => ({
+        ...prev,
+        wig20Value: wig20Stock ? wig20Stock.price : prev.wig20Value,
+        wig20Change: wig20Stock ? wig20Stock.changePercent : prev.wig20Change,
+        score: realOptimism,
+        label: getSentimentLabel(realOptimism),
+        updatedAt: formatWarsawTime()
+      }));
+    } finally {
+      setTimeout(() => setIsLiveUpdating(false), 700);
     }
-    await StooqService.fetchRealMarketData();
-    const freshStocks = [...StooqService.getStocks()];
-    setStocks(freshStocks);
-
-    PortfolioService.simulatePositionUpdate(freshStocks, triggerAutoPilotNotification);
-    PortfolioService.checkAndExecuteAutoPilotBuys(freshStocks, triggerAutoPilotNotification);
-
-    setPortfolios([...PortfolioService.getPortfolios()]);
-    setTrades([...PortfolioService.getTrades()]);
-
-    const wig20Stock = freshStocks.find(s => s.symbol.toUpperCase().includes('WIG20') || s.cleanSymbol.toUpperCase().includes('WIG20') || s.cleanSymbol.toUpperCase().includes('FW20'));
-    const advancing = freshStocks.filter(s => s.changePercent > 0).length;
-    const declining = freshStocks.filter(s => s.changePercent < 0).length;
-    const total = advancing + declining || 1;
-    const realOptimism = Math.min(95, Math.max(15, Math.round((advancing / total) * 70 + 20)));
-
-    const getSentimentLabel = (val: number): 'Ekstremalny strach' | 'Strach' | 'Neutralnie' | 'Chciwość' | 'Ekstremalna chciwość' => {
-      if (val >= 75) return 'Ekstremalna chciwość';
-      if (val >= 55) return 'Chciwość';
-      if (val >= 45) return 'Neutralnie';
-      if (val >= 25) return 'Strach';
-      return 'Ekstremalny strach';
-    };
-
-    setFearGreed(prev => ({
-      ...prev,
-      wig20Value: wig20Stock ? wig20Stock.price : prev.wig20Value,
-      wig20Change: wig20Stock ? wig20Stock.changePercent : prev.wig20Change,
-      score: realOptimism,
-      label: getSentimentLabel(realOptimism),
-      updatedAt: new Date().toLocaleTimeString('pl-PL')
-    }));
-
-    setTimeout(() => setIsLiveUpdating(false), 700);
   };
 
   const handlePortfoliosUpdate = (newPortfolios: PortfolioStrategy[]) => {
@@ -351,6 +461,8 @@ export default function App() {
             stocks={stocks}
             portfolios={portfolios}
             onSelectTicker={(sym) => handleSwitchToConsensus(sym)}
+            notifications={notificationHistory}
+            onMarkNotificationsRead={handleMarkNotificationsRead}
           />
 
           {/* Main Content Area */}
@@ -418,7 +530,7 @@ export default function App() {
           <footer className="border-t border-slate-900 bg-slate-950/85 py-4 text-center text-xs text-slate-500">
             <div className="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-2">
               <p>
-                StockSignalPl v2.0.0 • Polski Rynek Giełdowy (GPW Warszawa: WIG20, mWIG40, sWIG80, NewConnect, FW20).
+                StockSignalPl v2.4.5 • Polski Rynek Giełdowy (GPW Warszawa: WIG20, mWIG40, sWIG80, NewConnect, FW20).
               </p>
               <p className="font-mono text-[11px] text-slate-400">
                 Waluta: PLN (zł) • Benchmark: WIG20 • Odświeżanie: {appSettings.refreshIntervalSec}s
